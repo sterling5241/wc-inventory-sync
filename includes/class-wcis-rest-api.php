@@ -57,6 +57,19 @@ class WCIS_REST_API {
 				'permission_callback' => array( __CLASS__, 'verify_request' ),
 			)
 		);
+
+		// Either side: read-only "what's not syncing on THIS site right now"
+		// report, so the master's Subscriber Issues tab can show a
+		// subscriber's own gaps without direct database access to it.
+		register_rest_route(
+			self::NAMESPACE_V1,
+			'/not-synced',
+			array(
+				'methods'             => 'POST',
+				'callback'            => array( __CLASS__, 'handle_not_synced' ),
+				'permission_callback' => array( __CLASS__, 'verify_request' ),
+			)
+		);
 	}
 
 	/**
@@ -181,5 +194,9 @@ class WCIS_REST_API {
 		}
 
 		return new WP_REST_Response( array( 'ok' => true, 'results' => $results ), 200 );
+	}
+
+	public static function handle_not_synced( WP_REST_Request $request ) {
+		return new WP_REST_Response( array_merge( array( 'ok' => true ), WCIS_Diagnostics::get_unsynced_products() ), 200 );
 	}
 }

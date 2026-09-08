@@ -605,6 +605,58 @@ class WCIS_Admin {
 				</tbody>
 			</table>
 		<?php endif; ?>
+
+		<h3><?php esc_html_e( 'Not synced on this store', 'wc-inventory-sync' ); ?></h3>
+		<?php
+		$remote = WCIS_Http_Client::post(
+			WCIS_Http_Client::build_url( $selected->site_url, 'not-synced' ),
+			$selected->api_key,
+			$selected->api_secret,
+			array(),
+			20
+		);
+		?>
+		<?php if ( ! $remote['ok'] ) : ?>
+			<p><span style="color:#b32d2e"><?php esc_html_e( 'Could not fetch this list from the store right now:', 'wc-inventory-sync' ); ?></span> <?php echo esc_html( $remote['error'] ); ?></p>
+		<?php else : ?>
+			<?php $remote_issues = isset( $remote['body']['issues'] ) && is_array( $remote['body']['issues'] ) ? $remote['body']['issues'] : array(); ?>
+			<?php if ( empty( $remote_issues ) ) : ?>
+				<p><?php esc_html_e( 'Nothing found — every published, stock-managed product on this store has a SKU and is eligible to sync.', 'wc-inventory-sync' ); ?></p>
+			<?php else : ?>
+				<p class="description">
+					<?php
+					printf(
+						/* translators: %s: subscriber store name */
+						esc_html__( 'Pulled live from %s just now. Fixing these has to happen on that store itself — use the link to jump to its own Not Synced tab.', 'wc-inventory-sync' ),
+						esc_html( $selected->name )
+					);
+					?>
+				</p>
+				<table class="widefat striped">
+					<thead>
+						<tr>
+							<th><?php esc_html_e( 'Product', 'wc-inventory-sync' ); ?></th>
+							<th><?php esc_html_e( 'Type', 'wc-inventory-sync' ); ?></th>
+							<th><?php esc_html_e( 'SKU', 'wc-inventory-sync' ); ?></th>
+							<th><?php esc_html_e( 'Manage stock', 'wc-inventory-sync' ); ?></th>
+							<th><?php esc_html_e( 'Why it\'s skipped', 'wc-inventory-sync' ); ?></th>
+						</tr>
+					</thead>
+					<tbody>
+					<?php foreach ( $remote_issues as $item ) : ?>
+						<tr>
+							<td><?php echo esc_html( ! empty( $item['name'] ) ? $item['name'] : ( '#' . ( $item['id'] ?? '' ) ) ); ?></td>
+							<td><?php echo esc_html( $item['type'] ?? '' ); ?></td>
+							<td><?php echo ! empty( $item['sku'] ) ? '<code>' . esc_html( $item['sku'] ) . '</code>' : '<em>' . esc_html__( 'missing', 'wc-inventory-sync' ) . '</em>'; ?></td>
+							<td><?php echo ! empty( $item['manages'] ) ? esc_html__( 'Yes', 'wc-inventory-sync' ) : esc_html__( 'No', 'wc-inventory-sync' ); ?></td>
+							<td><?php echo esc_html( implode( '; ', (array) ( $item['reasons'] ?? array() ) ) ); ?></td>
+						</tr>
+					<?php endforeach; ?>
+					</tbody>
+				</table>
+				<p><a href="<?php echo esc_url( trailingslashit( $selected->site_url ) . 'wp-admin/admin.php?page=' . self::PAGE_SLUG . '&tab=not_synced' ); ?>" target="_blank" rel="noopener noreferrer" class="button"><?php echo esc_html( sprintf( __( 'Fix on %s →', 'wc-inventory-sync' ), $selected->name ) ); ?></a></p>
+			<?php endif; ?>
+		<?php endif; ?>
 		<?php
 	}
 
@@ -742,116 +794,8 @@ class WCIS_Admin {
 		}
 	}
 
-	/**
-	 * Scan published products/variations for ones that can't participate in
-	 * sync yet — same two conditions WCIS_Master/WCIS_Subscriber already
-	 * require (a SKU, and stock management enabled) — so the admin can find
-	 * and fix them instead of wondering why a product never shows up in the
-	 * Sync Log.
-	 */
-	protected static function get_unsynced_products( $limit_scan = 2000 ) {
-		global $wpdb;
-
-		$ids = $wpdb->get_col(
-			$wpdb->prepare(
-				"SELECT ID FROM {$wpdb->posts}
-				 WHERE post_type IN ('product','product_variation')
-				 AND post_status = 'publish'
-				 ORDER BY ID ASC
-				 LIMIT %d",
-				$limit_scan
-			)
-		);
-
-		$issues = array();
-		foreach ( $ids as $id ) {
-			$product = wc_get_product( $id );
-			if ( ! $product ) {
-				continue;
-			}
-
-			// Grouped/external products have no inventory concept at all in
-			// WooCommerce (their edit screen never shows stock fields) — skip.
-			if ( $product->is_type( array( 'grouped', 'external' ) ) ) {
-				continue;
-			}
-
-			// A variable product can manage stock two ways: a shared quantity
-			// set on the parent itself (applies to any variation that doesn't
-			// override it — WooCommerce shows this explicitly: "Settings
-			// below apply to all variations without manual stock management
-			// enabled"), or per-variation via manage_stock on each variation
-			// individually. Only flag the parent when NEITHER is in use
-			// anywhere in the family — that's the one case where nothing
-			// here can ever sync. A missing SKU on the parent is checked
-			// separately, and only matters if the parent itself is the one
-			// supposed to be managing/syncing stock.
-			if ( $product->is_type( 'variable' ) ) {
-				$family_manages_stock = $product->managing_stock();
-				if ( ! $family_manages_stock ) {
-					foreach ( $product->get_children() as $variation_id ) {
-						$variation = wc_get_product( $variation_id );
-						if ( $variation && $variation->managing_stock() ) {
-							$family_manages_stock = true;
-							break;
-						}
-					}
-				}
-
-				if ( ! $family_manages_stock ) {
-					$issues[] = array(
-						'id'      => $product->get_id(),
-						'edit_id' => $product->get_id(),
-						'name'    => $product->get_name(),
-						'type'    => $product->get_type(),
-						'sku'     => $product->get_sku(),
-						'manages' => false,
-						'reasons' => array( __( "Neither this product nor any of its variations has stock management enabled", 'wc-inventory-sync' ) ),
-					);
-				} elseif ( $product->managing_stock() && ! $product->get_sku() ) {
-					$issues[] = array(
-						'id'      => $product->get_id(),
-						'edit_id' => $product->get_id(),
-						'name'    => $product->get_name(),
-						'type'    => $product->get_type(),
-						'sku'     => '',
-						'manages' => true,
-						'reasons' => array( __( 'No SKU set', 'wc-inventory-sync' ) ),
-					);
-				}
-				continue;
-			}
-
-			$reasons = array();
-			if ( ! $product->get_sku() ) {
-				$reasons[] = __( 'No SKU set', 'wc-inventory-sync' );
-			}
-			if ( ! $product->managing_stock() ) {
-				$reasons[] = __( 'Stock management not enabled', 'wc-inventory-sync' );
-			}
-
-			if ( $reasons ) {
-				$issues[] = array(
-					'id'        => $product->get_id(),
-					'edit_id'   => $product->is_type( 'variation' ) ? $product->get_parent_id() : $product->get_id(),
-					'name'      => $product->get_name(),
-					'type'      => $product->get_type(),
-					'sku'       => $product->get_sku(),
-					'manages'   => $product->managing_stock(),
-					'reasons'   => $reasons,
-				);
-			}
-		}
-
-		return array(
-			'issues'    => $issues,
-			'scanned'   => count( $ids ),
-			'truncated' => count( $ids ) === $limit_scan,
-		);
-	}
-
 	protected static function render_not_synced_tab() {
-		$data   = self::get_unsynced_products();
+		$data   = WCIS_Diagnostics::get_unsynced_products();
 		$issues = $data['issues'];
 
 		$paged    = isset( $_GET['paged'] ) ? max( 1, absint( $_GET['paged'] ) ) : 1;

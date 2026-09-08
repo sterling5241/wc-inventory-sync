@@ -2,7 +2,7 @@
 Requires at least: 6.0
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.0.5
+Stable tag: 1.0.6
 License: GPLv2 or later
 
 Keep stock quantities in sync between one master WooCommerce store and any number of subscriber stores, matched by SKU.
@@ -43,6 +43,10 @@ The request is queued and retried automatically (every 5 minutes, with backoff, 
 The master does, for its own broadcast logic. On a subscriber, an incoming update from the master will turn stock management on for that product automatically if it wasn't already, so the pushed quantity actually takes effect.
 
 == Changelog ==
+
+= 1.0.6 =
+* Added a new /not-synced REST route: any site can report its own "Not Synced" list to an authenticated caller.
+* Subscriber Issues tab now also fetches and shows that subscriber's own Not Synced list live, with a link to jump straight to fixing it on that store.
 
 = 1.0.5 =
 * Added (master only): a "Subscriber Issues" tab — pick a subscriber store and see everything currently wrong involving just that store (failed pushes, sales it reported that couldn't be applied, anything still stuck in the retry queue).
