@@ -1156,11 +1156,49 @@ class WCIS_Admin {
 
 		<?php
 		$local_data  = WCIS_Diagnostics::get_unsynced_products();
-		$local_items = $local_data['issues']; // Source side: any not-synced master item, SKU or not.
+		$local_items = $local_data['issues']; // Not-synced on the master itself (missing SKU/stock mgmt).
+
+		// Also pull in master products that recently FAILED to reach this
+		// specific subscriber (e.g. "no product with this SKU there").
+		// These are usually perfectly fine on the master — they have a SKU,
+		// stock management is on, they sync everywhere else — so they'd
+		// never show up in the master's own not-synced list above. They're
+		// exactly the products that need matching help against this one
+		// subscriber, so they belong in this dropdown too.
+		$seen_ids = array();
+		foreach ( $local_items as $li ) {
+			$seen_ids[ $li['id'] ] = true;
+		}
+		$failed_rows = WCIS_Logger::get_recent(
+			array(
+				'remote_name' => $selected->name,
+				'status'      => 'error',
+				'per_page'    => 200,
+			)
+		);
+		foreach ( $failed_rows as $row ) {
+			if ( 'update_stock' !== $row->event || ! $row->product_id || isset( $seen_ids[ $row->product_id ] ) ) {
+				continue;
+			}
+			$product = wc_get_product( $row->product_id );
+			if ( ! $product ) {
+				continue;
+			}
+			$seen_ids[ $row->product_id ] = true;
+			$local_items[]                = array(
+				'id'      => $product->get_id(),
+				'edit_id' => $product->is_type( 'variation' ) ? $product->get_parent_id() : $product->get_id(),
+				'name'    => $product->get_name(),
+				'type'    => $product->get_type(),
+				'sku'     => $product->get_sku(),
+				'manages' => $product->managing_stock(),
+				'reasons' => array( sprintf( /* translators: 1: subscriber name, 2: error message */ __( 'Failed to sync to %1$s: %2$s', 'wc-inventory-sync' ), $selected->name, $row->message ) ),
+			);
+		}
 		?>
 
 		<?php if ( empty( $local_items ) ) : ?>
-			<p><?php esc_html_e( 'Nothing on the master is missing a SKU or stock management right now.', 'wc-inventory-sync' ); ?></p>
+			<p><?php echo esc_html( sprintf( __( 'Nothing on the master is missing a SKU or stock management, and nothing has recently failed to sync to %s.', 'wc-inventory-sync' ), $selected->name ) ); ?></p>
 			<?php return; ?>
 		<?php endif; ?>
 

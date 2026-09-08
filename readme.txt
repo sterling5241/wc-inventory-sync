@@ -2,7 +2,7 @@
 Requires at least: 6.0
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.0.10
+Stable tag: 1.0.11
 License: GPLv2 or later
 
 Keep stock quantities in sync between one master WooCommerce store and any number of subscriber stores, matched by SKU.
@@ -43,6 +43,9 @@ The request is queued and retried automatically (every 5 minutes, with backoff, 
 The master does, for its own broadcast logic. On a subscriber, an incoming update from the master will turn stock management on for that product automatically if it wasn't already, so the pushed quantity actually takes effect.
 
 == Changelog ==
+
+= 1.0.11 =
+* Fixed: Manual Match (master side) now also includes master products that recently failed to sync to the selected subscriber, not just products that are unsynced on the master itself. Most failing products are already perfectly fine on the master (SKU set, stock management on, syncing everywhere else) — they were never showing up as matchable before because they had nothing wrong with them locally.
 
 = 1.0.10 =
 * Fixed: a real-time push to a subscriber that doesn't carry a given product (404 "no product with this SKU") no longer gets queued for retry — that's not a transient failure, retrying can't ever succeed until the subscriber's catalog changes. Other failures (timeouts, connection errors, etc.) still retry as before.
