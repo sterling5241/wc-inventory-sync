@@ -2,7 +2,7 @@
 Requires at least: 6.0
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.0.12
+Stable tag: 1.0.13
 License: GPLv2 or later
 
 Keep stock quantities in sync between one master WooCommerce store and any number of subscriber stores, matched by SKU.
@@ -43,6 +43,9 @@ The request is queued and retried automatically (every 5 minutes, with backoff, 
 The master does, for its own broadcast logic. On a subscriber, an incoming update from the master will turn stock management on for that product automatically if it wasn't already, so the pushed quantity actually takes effect.
 
 == Changelog ==
+
+= 1.0.13 =
+* Product lists are now sorted alphabetically by name (natural, case-insensitive sort) — the Not Synced table, both Manual Match dropdowns on both roles, and the remote lists fetched from another store (they're sorted before being sent back, so this applies everywhere without extra work).
 
 = 1.0.12 =
 * Fixed: Manual Match (master side) now lists the master's ENTIRE catalog as possible match sources, not just not-synced or recently-failed items. A product you already matched to one subscriber was disappearing from the picker when trying to match it to a different subscriber, since it was no longer "broken" by either of the previous two narrower definitions.

@@ -110,6 +110,13 @@ class WCIS_Diagnostics {
 			}
 		}
 
+		usort(
+			$issues,
+			function ( $a, $b ) {
+				return strnatcasecmp( $a['name'], $b['name'] );
+			}
+		);
+
 		return array(
 			'issues'    => $issues,
 			'scanned'   => count( $ids ),
@@ -168,6 +175,13 @@ class WCIS_Diagnostics {
 				'manages' => $product->managing_stock(),
 			);
 		}
+
+		usort(
+			$items,
+			function ( $a, $b ) {
+				return strnatcasecmp( $a['name'], $b['name'] );
+			}
+		);
 
 		return array(
 			'items'     => $items,
