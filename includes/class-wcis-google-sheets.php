@@ -4,23 +4,47 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Batches local Sync Log rows out to a Google Sheet via a Service Account
  * (server-to-server — no OAuth consent screen; the service account is just
- * added as an Editor on the target spreadsheet). Runs on its own 5-minute
- * cron rather than exporting live from WCIS_Logger::log(), so a big
- * reconciliation burst (hundreds of rows) becomes one batched API call
- * instead of hundreds of live ones, and normal sync operations never wait
- * on Google's API.
+ * added as an Editor on the target spreadsheet). Runs on its own
+ * configurable-interval cron rather than exporting live from
+ * WCIS_Logger::log(), so a big reconciliation burst (hundreds of rows)
+ * becomes one batched API call instead of hundreds of live ones, and
+ * normal sync operations never wait on Google's API.
  */
 class WCIS_Google_Sheets {
 
 	const TOKEN_TRANSIENT = 'wcis_gsheets_access_token';
 	const SCOPE           = 'https://www.googleapis.com/auth/spreadsheets';
 	const CRON_HOOK       = 'wcis_gsheets_export_event';
+	const SCHEDULE_KEY    = 'wcis_gsheets_interval';
 
 	public static function init() {
+		add_filter( 'cron_schedules', array( __CLASS__, 'add_schedule' ) );
 		add_action( self::CRON_HOOK, array( __CLASS__, 'export_pending' ) );
 		if ( ! wp_next_scheduled( self::CRON_HOOK ) ) {
-			wp_schedule_event( time() + 120, 'wcis_five_minutes', self::CRON_HOOK );
+			wp_schedule_event( time() + 120, self::SCHEDULE_KEY, self::CRON_HOOK );
 		}
+	}
+
+	public static function add_schedule( $schedules ) {
+		$minutes                        = max( 5, absint( get_option( 'wcis_gsheets_export_interval_minutes', 15 ) ) );
+		$schedules[ self::SCHEDULE_KEY ] = array(
+			'interval' => $minutes * MINUTE_IN_SECONDS,
+			/* translators: %d: minutes */
+			'display'  => sprintf( __( 'Every %d minutes (WC Inventory Sync — Google Sheets)', 'wc-inventory-sync' ), $minutes ),
+		);
+		return $schedules;
+	}
+
+	/**
+	 * Call after the export-interval setting changes so the new interval
+	 * takes effect immediately instead of on the next stale run.
+	 */
+	public static function reschedule() {
+		$timestamp = wp_next_scheduled( self::CRON_HOOK );
+		if ( $timestamp ) {
+			wp_unschedule_event( $timestamp, self::CRON_HOOK );
+		}
+		wp_schedule_event( time() + 60, self::SCHEDULE_KEY, self::CRON_HOOK );
 	}
 
 	public static function deactivate() {

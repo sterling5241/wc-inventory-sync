@@ -216,6 +216,10 @@ class WCIS_Admin {
 		update_option( 'wcis_gsheets_spreadsheet_id', sanitize_text_field( $spreadsheet_input ) );
 		update_option( 'wcis_gsheets_sheet_name', isset( $_POST['sheet_name'] ) ? sanitize_text_field( wp_unslash( $_POST['sheet_name'] ) ) : 'Sync Log' );
 
+		$interval = isset( $_POST['export_interval_minutes'] ) ? absint( $_POST['export_interval_minutes'] ) : 15;
+		update_option( 'wcis_gsheets_export_interval_minutes', max( 5, $interval ) );
+		WCIS_Google_Sheets::reschedule();
+
 		// Only overwrite the stored credentials if something was actually
 		// pasted -- the textarea is left blank on reload so the private key
 		// isn't echoed back onto the page every time.
@@ -1375,7 +1379,7 @@ class WCIS_Admin {
 		global $wpdb;
 		$pending_count = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->prefix}wcis_log WHERE id > %d", $last_id ) );
 		?>
-		<p><?php esc_html_e( 'Every sync event logged here (the same rows as the Sync Log tab) is also batched out to a Google Sheet every 5 minutes, so you can view, share, or build reports on it outside of wp-admin.', 'wc-inventory-sync' ); ?></p>
+		<p><?php esc_html_e( 'Every sync event logged here (the same rows as the Sync Log tab) is also batched out to a Google Sheet on the interval below, so you can view, share, or build reports on it outside of wp-admin.', 'wc-inventory-sync' ); ?></p>
 
 		<h2><?php esc_html_e( 'One-time Google setup', 'wc-inventory-sync' ); ?></h2>
 		<ol>
@@ -1401,6 +1405,12 @@ class WCIS_Admin {
 				<tr>
 					<th scope="row"><label for="sheet_name"><?php esc_html_e( 'Tab name', 'wc-inventory-sync' ); ?></label></th>
 					<td><input type="text" class="regular-text" name="sheet_name" id="sheet_name" value="<?php echo esc_attr( $sheet_name ); ?>" placeholder="Sync Log" /></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="export_interval_minutes"><?php esc_html_e( 'Export interval', 'wc-inventory-sync' ); ?></label></th>
+					<td>
+						<input type="number" min="5" step="1" name="export_interval_minutes" id="export_interval_minutes" value="<?php echo esc_attr( get_option( 'wcis_gsheets_export_interval_minutes', 15 ) ); ?>" class="small-text" /> <?php esc_html_e( 'minutes (minimum 5)', 'wc-inventory-sync' ); ?>
+					</td>
 				</tr>
 				<tr>
 					<th scope="row"><label for="service_account_json"><?php esc_html_e( 'Service Account JSON', 'wc-inventory-sync' ); ?></label></th>

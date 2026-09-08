@@ -2,7 +2,7 @@
 Requires at least: 6.0
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.1.1
 License: GPLv2 or later
 
 Keep stock quantities in sync between one master WooCommerce store and any number of subscriber stores, matched by SKU.
@@ -43,6 +43,9 @@ The request is queued and retried automatically (every 5 minutes, with backoff, 
 The master does, for its own broadcast logic. On a subscriber, an incoming update from the master will turn stock management on for that product automatically if it wasn't already, so the pushed quantity actually takes effect.
 
 == Changelog ==
+
+= 1.1.1 =
+* The Google Sheets export interval is now configurable (Google Sheets tab), instead of hardcoded to 5 minutes — default 15, minimum 5.
 
 = 1.1.0 =
 * Added: export the Sync Log to a Google Sheet. New "Google Sheets" tab — connect a Google Service Account (JSON key, no OAuth login screen), pick a spreadsheet + tab, and every sync event gets batched out every 5 minutes (plus a manual "Export Now" and a "Test Connection"). Batched rather than one API call per event, so a big reconciliation burst doesn't hammer Google's rate limits.
