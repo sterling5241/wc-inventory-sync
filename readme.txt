@@ -2,7 +2,7 @@
 Requires at least: 6.0
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.0.13
+Stable tag: 1.0.14
 License: GPLv2 or later
 
 Keep stock quantities in sync between one master WooCommerce store and any number of subscriber stores, matched by SKU.
@@ -43,6 +43,11 @@ The request is queued and retried automatically (every 5 minutes, with backoff, 
 The master does, for its own broadcast logic. On a subscriber, an incoming update from the master will turn stock management on for that product automatically if it wasn't already, so the pushed quantity actually takes effect.
 
 == Changelog ==
+
+= 1.0.14 =
+* Fixed: a Manual Match only set the SKU — the matched product sat at whatever quantity it already had until the next reconciliation cycle. Both directions now also push the correct starting quantity at match time: master→subscriber pushes the master's current stock right after the SKU lands; subscriber→master applies the quantity captured from the master's item when the match was made.
+* WCIS_Diagnostics payloads now include quantity/stock_status per item (previously only sku/manages), used to carry this through.
+* WCIS_Master::send_update_stock() is now public so admin actions can push a one-off quantity outside the normal broadcast path.
 
 = 1.0.13 =
 * Product lists are now sorted alphabetically by name (natural, case-insensitive sort) — the Not Synced table, both Manual Match dropdowns on both roles, and the remote lists fetched from another store (they're sorted before being sent back, so this applies everywhere without extra work).

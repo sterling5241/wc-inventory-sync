@@ -67,23 +67,27 @@ class WCIS_Diagnostics {
 
 				if ( ! $family_manages_stock ) {
 					$issues[] = array(
-						'id'      => $product->get_id(),
-						'edit_id' => $product->get_id(),
-						'name'    => $product->get_name(),
-						'type'    => $product->get_type(),
-						'sku'     => $product->get_sku(),
-						'manages' => false,
-						'reasons' => array( __( 'Neither this product nor any of its variations has stock management enabled', 'wc-inventory-sync' ) ),
+						'id'           => $product->get_id(),
+						'edit_id'      => $product->get_id(),
+						'name'         => $product->get_name(),
+						'type'         => $product->get_type(),
+						'sku'          => $product->get_sku(),
+						'manages'      => false,
+						'quantity'     => null,
+						'stock_status' => '',
+						'reasons'      => array( __( 'Neither this product nor any of its variations has stock management enabled', 'wc-inventory-sync' ) ),
 					);
 				} elseif ( $product->managing_stock() && ! $product->get_sku() ) {
 					$issues[] = array(
-						'id'      => $product->get_id(),
-						'edit_id' => $product->get_id(),
-						'name'    => $product->get_name(),
-						'type'    => $product->get_type(),
-						'sku'     => '',
-						'manages' => true,
-						'reasons' => array( __( 'No SKU set', 'wc-inventory-sync' ) ),
+						'id'           => $product->get_id(),
+						'edit_id'      => $product->get_id(),
+						'name'         => $product->get_name(),
+						'type'         => $product->get_type(),
+						'sku'          => '',
+						'manages'      => true,
+						'quantity'     => (int) $product->get_stock_quantity(),
+						'stock_status' => $product->get_stock_status(),
+						'reasons'      => array( __( 'No SKU set', 'wc-inventory-sync' ) ),
 					);
 				}
 				continue;
@@ -99,13 +103,15 @@ class WCIS_Diagnostics {
 
 			if ( $reasons ) {
 				$issues[] = array(
-					'id'      => $product->get_id(),
-					'edit_id' => $product->is_type( 'variation' ) ? $product->get_parent_id() : $product->get_id(),
-					'name'    => $product->get_name(),
-					'type'    => $product->get_type(),
-					'sku'     => $product->get_sku(),
-					'manages' => $product->managing_stock(),
-					'reasons' => $reasons,
+					'id'           => $product->get_id(),
+					'edit_id'      => $product->is_type( 'variation' ) ? $product->get_parent_id() : $product->get_id(),
+					'name'         => $product->get_name(),
+					'type'         => $product->get_type(),
+					'sku'          => $product->get_sku(),
+					'manages'      => $product->managing_stock(),
+					'quantity'     => $product->managing_stock() ? (int) $product->get_stock_quantity() : null,
+					'stock_status' => $product->managing_stock() ? $product->get_stock_status() : '',
+					'reasons'      => $reasons,
 				);
 			}
 		}
@@ -167,12 +173,14 @@ class WCIS_Diagnostics {
 			}
 
 			$items[] = array(
-				'id'      => $product->get_id(),
-				'edit_id' => $product->is_type( 'variation' ) ? $product->get_parent_id() : $product->get_id(),
-				'name'    => $product->get_name(),
-				'type'    => $product->get_type(),
-				'sku'     => $product->get_sku(),
-				'manages' => $product->managing_stock(),
+				'id'           => $product->get_id(),
+				'edit_id'      => $product->is_type( 'variation' ) ? $product->get_parent_id() : $product->get_id(),
+				'name'         => $product->get_name(),
+				'type'         => $product->get_type(),
+				'sku'          => $product->get_sku(),
+				'manages'      => $product->managing_stock(),
+				'quantity'     => $product->managing_stock() ? (int) $product->get_stock_quantity() : null,
+				'stock_status' => $product->managing_stock() ? $product->get_stock_status() : '',
 			);
 		}
 

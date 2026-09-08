@@ -71,7 +71,12 @@ class WCIS_Master {
 		}
 	}
 
-	protected static function send_update_stock( $subscriber, $sku, $quantity, $stock_status, $product_id = 0 ) {
+	/**
+	 * Push an absolute stock value for one SKU to one subscriber. Public so
+	 * admin actions (e.g. finishing a Manual Match) can push a starting
+	 * quantity immediately, on top of its normal use from broadcast_stock().
+	 */
+	public static function send_update_stock( $subscriber, $sku, $quantity, $stock_status, $product_id = 0 ) {
 		$body = array(
 			'sku'          => $sku,
 			'quantity'     => $quantity,

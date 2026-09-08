@@ -275,9 +275,12 @@ class WCIS_Admin {
 		self::check_cap();
 		check_admin_referer( 'wcis_apply_local_sku' );
 
-		$product_id = isset( $_POST['product_id'] ) ? absint( $_POST['product_id'] ) : 0;
-		$sku        = isset( $_POST['sku'] ) ? sanitize_text_field( wp_unslash( $_POST['sku'] ) ) : '';
-		$product    = $product_id ? wc_get_product( $product_id ) : false;
+		$product_id   = isset( $_POST['product_id'] ) ? absint( $_POST['product_id'] ) : 0;
+		$raw_data     = isset( $_POST['sku_data'] ) ? json_decode( wp_unslash( $_POST['sku_data'] ), true ) : null;
+		$sku          = is_array( $raw_data ) && isset( $raw_data['sku'] ) ? sanitize_text_field( $raw_data['sku'] ) : '';
+		$quantity     = is_array( $raw_data ) && isset( $raw_data['quantity'] ) && null !== $raw_data['quantity'] ? intval( $raw_data['quantity'] ) : null;
+		$stock_status = is_array( $raw_data ) && ! empty( $raw_data['stock_status'] ) ? sanitize_text_field( $raw_data['stock_status'] ) : '';
+		$product      = $product_id ? wc_get_product( $product_id ) : false;
 
 		if ( ! $product || ! $sku ) {
 			self::redirect_back( 'manual_match', array( 'wcis_notice' => 'error' ) );
@@ -293,12 +296,31 @@ class WCIS_Admin {
 		$product->set_sku( $sku );
 		$product->save();
 
+		// The SKU alone doesn't bring the quantity with it -- without this,
+		// this site would sit at whatever stock it already had until the
+		// next reconciliation cycle. Apply the master's quantity (captured
+		// when the dropdown was built) right now so the match is complete.
+		if ( null !== $quantity ) {
+			if ( ! $product->managing_stock() ) {
+				$product->set_manage_stock( true );
+			}
+			$new_stock = wc_update_product_stock( $product, $quantity, 'set' );
+			if ( false !== $new_stock && $stock_status ) {
+				$product = wc_get_product( $product_id );
+				if ( $product && $product->get_stock_status() !== $stock_status ) {
+					$product->set_stock_status( $stock_status );
+					$product->save();
+				}
+			}
+		}
+
 		WCIS_Logger::log(
 			array(
 				'direction'  => 'incoming',
 				'event'      => 'sku_match',
 				'sku'        => $sku,
 				'product_id' => $product_id,
+				'qty_after'  => $quantity,
 				'status'     => 'success',
 				'message'    => 'SKU assigned via manual match against the master.',
 			)
@@ -361,6 +383,15 @@ class WCIS_Admin {
 				'message'     => $result['ok'] ? '' : $result['error'],
 			)
 		);
+
+		// The SKU landing doesn't push a quantity on its own -- without
+		// this, the subscriber sits at whatever stock it already had until
+		// the next reconciliation cycle or the next time this product's
+		// stock happens to change. Push the master's current quantity right
+		// now so the match is actually complete, not just linked.
+		if ( $result['ok'] && $product->managing_stock() ) {
+			WCIS_Master::send_update_stock( $subscriber, $sku, (int) $product->get_stock_quantity(), $product->get_stock_status(), $product_id );
+		}
 
 		self::redirect_back(
 			'manual_match',
@@ -1095,10 +1126,19 @@ class WCIS_Admin {
 				<tr>
 					<th scope="row"><label for="wcis_master_item"><?php esc_html_e( "Master's item", 'wc-inventory-sync' ); ?></label></th>
 					<td>
-						<select name="sku" id="wcis_master_item" required>
+						<select name="sku_data" id="wcis_master_item" required>
 							<option value=""><?php esc_html_e( '— choose —', 'wc-inventory-sync' ); ?></option>
-							<?php foreach ( $remote_with_sku as $item ) : ?>
-								<option value="<?php echo esc_attr( $item['sku'] ); ?>"><?php echo esc_html( ( ! empty( $item['name'] ) ? $item['name'] : '' ) . ' — ' . $item['sku'] ); ?></option>
+							<?php
+							foreach ( $remote_with_sku as $item ) :
+								$data = wp_json_encode(
+									array(
+										'sku'          => $item['sku'],
+										'quantity'     => isset( $item['quantity'] ) ? $item['quantity'] : null,
+										'stock_status' => isset( $item['stock_status'] ) ? $item['stock_status'] : '',
+									)
+								);
+								?>
+								<option value="<?php echo esc_attr( $data ); ?>"><?php echo esc_html( ( ! empty( $item['name'] ) ? $item['name'] : '' ) . ' — ' . $item['sku'] . ( isset( $item['quantity'] ) && null !== $item['quantity'] ? ' (qty ' . $item['quantity'] . ')' : '' ) ); ?></option>
 							<?php endforeach; ?>
 						</select>
 					</td>
