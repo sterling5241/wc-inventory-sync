@@ -83,7 +83,12 @@ class WCIS_Master {
 
 		self::record_result( $subscriber, 'update_stock', $sku, $product_id, null, $quantity, null, $result );
 
-		if ( ! $result['ok'] ) {
+		// Don't retry a 404 "no product with this SKU here" — that's not a
+		// transient failure, it means this subscriber simply doesn't carry
+		// this product. Retrying would just fail identically every time
+		// until the subscriber's catalog changes, wasting the retry queue.
+		// Anything else (timeout, 5xx, auth issue, etc.) is worth retrying.
+		if ( ! $result['ok'] && 404 !== (int) $result['code'] ) {
 			WCIS_Outbox::enqueue( $subscriber->id, 'update-stock', $body );
 		}
 
