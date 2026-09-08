@@ -2,7 +2,7 @@
 Requires at least: 6.0
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.0.7
+Stable tag: 1.0.8
 License: GPLv2 or later
 
 Keep stock quantities in sync between one master WooCommerce store and any number of subscriber stores, matched by SKU.
@@ -43,6 +43,9 @@ The request is queued and retried automatically (every 5 minutes, with backoff, 
 The master does, for its own broadcast logic. On a subscriber, an incoming update from the master will turn stock management on for that product automatically if it wasn't already, so the pushed quantity actually takes effect.
 
 == Changelog ==
+
+= 1.0.8 =
+* Added Author / Author URI to the plugin header so "By dexabyte.ca" shows on the Plugins page.
 
 = 1.0.7 =
 * Added a "Manual Match" tab, on both master and subscriber: pair up a not-synced item on this site with the matching item on the other side and copy the master's SKU onto it, for cases where the same product ended up with different (or no) SKUs on each store and never matched automatically.
