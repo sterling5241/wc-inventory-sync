@@ -68,6 +68,22 @@ class WCIS_Outbox {
 		);
 	}
 
+	/**
+	 * Pending/failed items still queued for one subscriber (master role) —
+	 * used by the per-subscriber issues tab.
+	 */
+	public static function get_for_subscriber( $subscriber_id, $limit = 100 ) {
+		global $wpdb;
+		$table = $wpdb->prefix . 'wcis_outbox';
+		return $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM {$table} WHERE subscriber_id = %d AND status IN ('pending','failed') ORDER BY id DESC LIMIT %d",
+				$subscriber_id,
+				$limit
+			)
+		);
+	}
+
 	public static function count_pending() {
 		global $wpdb;
 		return (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}wcis_outbox WHERE status = 'pending'" );

@@ -22,6 +22,8 @@ class WCIS_Admin {
 		add_action( 'admin_post_wcis_test_master_connection', array( __CLASS__, 'handle_test_master_connection' ) );
 		add_action( 'admin_post_wcis_test_subscriber_connection', array( __CLASS__, 'handle_test_subscriber_connection' ) );
 		add_action( 'admin_post_wcis_requeue_outbox', array( __CLASS__, 'handle_requeue_outbox' ) );
+		add_action( 'admin_post_wcis_generate_sku', array( __CLASS__, 'handle_generate_sku' ) );
+		add_action( 'admin_post_wcis_enable_stock_management', array( __CLASS__, 'handle_enable_stock_management' ) );
 	}
 
 	public static function add_menu() {
@@ -183,6 +185,72 @@ class WCIS_Admin {
 		self::redirect_back( 'outbox', array( 'wcis_notice' => 'requeued' ) );
 	}
 
+	/**
+	 * Generate a placeholder SKU for a product that doesn't have one, so it
+	 * becomes eligible to sync. This only sets the SKU on THIS site — it
+	 * does not (and can't) touch the matching product on any other store,
+	 * so the same value still needs to exist there too for sync to
+	 * actually match them up. Format: AUTOGEN-<product ID>, which is always
+	 * unique on this site by construction; still checked for a collision
+	 * before saving, just in case something else already used it.
+	 */
+	public static function handle_generate_sku() {
+		self::check_cap();
+		check_admin_referer( 'wcis_generate_sku' );
+
+		$product_id = isset( $_POST['product_id'] ) ? absint( $_POST['product_id'] ) : 0;
+		$product    = $product_id ? wc_get_product( $product_id ) : false;
+
+		if ( ! $product ) {
+			self::redirect_back( 'not_synced', array( 'wcis_notice' => 'error' ) );
+		}
+		if ( $product->get_sku() ) {
+			self::redirect_back( 'not_synced', array( 'wcis_notice' => 'sku_exists' ) );
+		}
+
+		$candidate = 'AUTOGEN-' . $product_id;
+		$taken_by  = wc_get_product_id_by_sku( $candidate );
+		if ( $taken_by && (int) $taken_by !== $product_id ) {
+			self::redirect_back( 'not_synced', array( 'wcis_notice' => 'error' ) );
+		}
+
+		$product->set_sku( $candidate );
+		$product->save();
+
+		self::redirect_back( 'not_synced', array( 'wcis_notice' => 'sku_generated' ) );
+	}
+
+	/**
+	 * Turn on "Manage stock?" for a product and set its starting quantity in
+	 * one step, right from the Not Synced tab. Uses the same
+	 * wc_update_product_stock('set') path the sync engine itself uses, so
+	 * on a master site this also immediately broadcasts the new quantity to
+	 * every subscriber (as long as the product also has a SKU).
+	 */
+	public static function handle_enable_stock_management() {
+		self::check_cap();
+		check_admin_referer( 'wcis_enable_stock_management' );
+
+		$product_id = isset( $_POST['product_id'] ) ? absint( $_POST['product_id'] ) : 0;
+		$quantity   = isset( $_POST['quantity'] ) ? intval( $_POST['quantity'] ) : null;
+		$product    = $product_id ? wc_get_product( $product_id ) : false;
+
+		if ( ! $product || null === $quantity || $quantity < 0 ) {
+			self::redirect_back( 'not_synced', array( 'wcis_notice' => 'error' ) );
+		}
+
+		if ( ! $product->managing_stock() ) {
+			$product->set_manage_stock( true );
+		}
+		$new_stock = wc_update_product_stock( $product, $quantity, 'set' );
+
+		if ( false === $new_stock ) {
+			self::redirect_back( 'not_synced', array( 'wcis_notice' => 'error' ) );
+		}
+
+		self::redirect_back( 'not_synced', array( 'wcis_notice' => 'stock_enabled' ) );
+	}
+
 	public static function notices() {
 		if ( empty( $_GET['page'] ) || self::PAGE_SLUG !== $_GET['page'] || empty( $_GET['wcis_notice'] ) ) {
 			return;
@@ -196,6 +264,9 @@ class WCIS_Admin {
 			'connection_ok'      => array( 'success', __( 'Connection successful.', 'wc-inventory-sync' ) ),
 			'connection_failed'  => array( 'error', __( 'Connection failed. Check the URL and keys and try again.', 'wc-inventory-sync' ) ),
 			'requeued'           => array( 'success', __( 'Failed items re-queued for retry.', 'wc-inventory-sync' ) ),
+			'sku_generated'      => array( 'success', __( 'SKU generated on this site. Remember to set the same SKU on the matching product on your other store(s) — that\'s what actually links them for sync.', 'wc-inventory-sync' ) ),
+			'sku_exists'         => array( 'error', __( 'That product already has a SKU.', 'wc-inventory-sync' ) ),
+			'stock_enabled'      => array( 'success', __( 'Stock management enabled and quantity saved.', 'wc-inventory-sync' ) ),
 			'error'              => array( 'error', __( 'Something went wrong. Please check the form and try again.', 'wc-inventory-sync' ) ),
 		);
 		if ( isset( $map[ $notice ] ) ) {
@@ -218,6 +289,7 @@ class WCIS_Admin {
 				<a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG ) ); ?>" class="nav-tab <?php echo '' === $tab ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Setup', 'wc-inventory-sync' ); ?></a>
 				<?php if ( 'master' === $role ) : ?>
 					<a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&tab=subscribers' ) ); ?>" class="nav-tab <?php echo 'subscribers' === $tab ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Subscriber Stores', 'wc-inventory-sync' ); ?></a>
+					<a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&tab=subscriber_issues' ) ); ?>" class="nav-tab <?php echo 'subscriber_issues' === $tab ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Subscriber Issues', 'wc-inventory-sync' ); ?></a>
 				<?php endif; ?>
 				<?php if ( 'subscriber' === $role ) : ?>
 					<a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&tab=connection' ) ); ?>" class="nav-tab <?php echo 'connection' === $tab ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Master Connection', 'wc-inventory-sync' ); ?></a>
@@ -234,6 +306,9 @@ class WCIS_Admin {
 						break;
 					case 'connection':
 						self::render_connection_tab();
+						break;
+					case 'subscriber_issues':
+						self::render_subscriber_issues_tab();
 						break;
 					case 'not_synced':
 						self::render_not_synced_tab();
@@ -403,6 +478,132 @@ class WCIS_Admin {
 				<button class="button button-primary"><?php esc_html_e( 'Full Sync — All Subscribers Now', 'wc-inventory-sync' ); ?></button>
 			</form>
 		</p>
+		<?php endif; ?>
+		<?php
+	}
+
+	/**
+	 * Master-only: pick a subscriber and see everything currently wrong
+	 * involving just that store — recent error events (both directions:
+	 * pushes the master sent it that failed, and sales/restocks it
+	 * reported that the master couldn't apply) plus anything still stuck
+	 * in the retry queue for it. WCIS_Logger rows are tagged with
+	 * remote_name for both directions already, so filtering by that one
+	 * field covers the whole relationship.
+	 */
+	protected static function render_subscriber_issues_tab() {
+		$subscribers = WCIS_Master::get_subscribers();
+		if ( empty( $subscribers ) ) {
+			echo '<p>' . esc_html__( 'No subscriber stores yet.', 'wc-inventory-sync' ) . '</p>';
+			return;
+		}
+
+		$selected_id = isset( $_GET['sub_id'] ) ? absint( $_GET['sub_id'] ) : (int) $subscribers[0]->id;
+		$selected    = null;
+		foreach ( $subscribers as $s ) {
+			if ( (int) $s->id === $selected_id ) {
+				$selected = $s;
+				break;
+			}
+		}
+		if ( ! $selected ) {
+			$selected    = $subscribers[0];
+			$selected_id = (int) $selected->id;
+		}
+		?>
+		<p><?php esc_html_e( 'Pick a subscriber store to see everything currently wrong involving just that store — failed pushes to it, sales it reported that couldn\'t be applied, and anything still stuck retrying.', 'wc-inventory-sync' ); ?></p>
+
+		<p class="subsubsub" style="margin-bottom:16px;">
+			<?php foreach ( $subscribers as $i => $s ) : ?>
+				<?php $error_count = (int) WCIS_Logger::count_total( array( 'remote_name' => $s->name, 'status' => 'error' ) ); ?>
+				<a href="<?php echo esc_url( add_query_arg( 'sub_id', $s->id, admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&tab=subscriber_issues' ) ) ); ?>" class="<?php echo (int) $s->id === $selected_id ? 'current' : ''; ?>">
+					<?php echo esc_html( $s->name ); ?>
+					<?php if ( $error_count > 0 ) : ?>
+						<span class="count">(<?php echo esc_html( $error_count ); ?>)</span>
+					<?php endif; ?>
+				</a>
+				<?php echo $i < count( $subscribers ) - 1 ? ' | ' : ''; ?>
+			<?php endforeach; ?>
+		</p>
+
+		<h2>
+			<?php echo esc_html( $selected->name ); ?>
+			<span style="font-weight:normal;font-size:14px;">
+				&mdash; <?php echo esc_html( $selected->site_url ); ?>
+				&mdash; <?php echo esc_html( ucfirst( $selected->status ) ); ?>
+			</span>
+		</h2>
+
+		<?php if ( $selected->last_error ) : ?>
+			<p><strong><?php esc_html_e( 'Most recent connection error:', 'wc-inventory-sync' ); ?></strong> <span style="color:#b32d2e"><?php echo esc_html( $selected->last_error ); ?></span></p>
+		<?php endif; ?>
+
+		<h3><?php esc_html_e( 'Still queued for retry', 'wc-inventory-sync' ); ?></h3>
+		<?php $outbox_items = WCIS_Outbox::get_for_subscriber( $selected_id ); ?>
+		<?php if ( empty( $outbox_items ) ) : ?>
+			<p><?php esc_html_e( 'Nothing queued.', 'wc-inventory-sync' ); ?></p>
+		<?php else : ?>
+			<table class="widefat striped">
+				<thead>
+					<tr>
+						<th><?php esc_html_e( 'Queued', 'wc-inventory-sync' ); ?></th>
+						<th><?php esc_html_e( 'Endpoint', 'wc-inventory-sync' ); ?></th>
+						<th><?php esc_html_e( 'Attempts', 'wc-inventory-sync' ); ?></th>
+						<th><?php esc_html_e( 'Next try', 'wc-inventory-sync' ); ?></th>
+						<th><?php esc_html_e( 'Status', 'wc-inventory-sync' ); ?></th>
+						<th><?php esc_html_e( 'Last error', 'wc-inventory-sync' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+				<?php foreach ( $outbox_items as $o ) : ?>
+					<tr>
+						<td><?php echo esc_html( $o->created_at ); ?></td>
+						<td><code><?php echo esc_html( $o->endpoint ); ?></code></td>
+						<td><?php echo esc_html( $o->attempts ); ?></td>
+						<td><?php echo esc_html( $o->next_attempt_at ); ?></td>
+						<td><?php echo esc_html( ucfirst( $o->status ) ); ?></td>
+						<td><?php echo esc_html( $o->last_error ); ?></td>
+					</tr>
+				<?php endforeach; ?>
+				</tbody>
+			</table>
+		<?php endif; ?>
+
+		<h3><?php esc_html_e( 'Recent errors', 'wc-inventory-sync' ); ?></h3>
+		<?php
+		$error_rows = WCIS_Logger::get_recent(
+			array(
+				'remote_name' => $selected->name,
+				'status'      => 'error',
+				'per_page'    => 50,
+			)
+		);
+		?>
+		<?php if ( empty( $error_rows ) ) : ?>
+			<p><?php esc_html_e( 'No errors logged for this store.', 'wc-inventory-sync' ); ?></p>
+		<?php else : ?>
+			<table class="widefat striped">
+				<thead>
+					<tr>
+						<th><?php esc_html_e( 'Time', 'wc-inventory-sync' ); ?></th>
+						<th><?php esc_html_e( 'Dir', 'wc-inventory-sync' ); ?></th>
+						<th><?php esc_html_e( 'Event', 'wc-inventory-sync' ); ?></th>
+						<th><?php esc_html_e( 'SKU', 'wc-inventory-sync' ); ?></th>
+						<th><?php esc_html_e( 'Message', 'wc-inventory-sync' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+				<?php foreach ( $error_rows as $row ) : ?>
+					<tr>
+						<td><?php echo esc_html( $row->created_at ); ?></td>
+						<td><?php echo esc_html( $row->direction ); ?></td>
+						<td><?php echo esc_html( $row->event ); ?></td>
+						<td><code><?php echo esc_html( $row->sku ); ?></code></td>
+						<td><?php echo esc_html( $row->message ); ?></td>
+					</tr>
+				<?php endforeach; ?>
+				</tbody>
+			</table>
 		<?php endif; ?>
 		<?php
 	}
@@ -659,6 +860,7 @@ class WCIS_Admin {
 		$page_items = array_slice( $issues, ( $paged - 1 ) * $per_page, $per_page );
 		?>
 		<p><?php esc_html_e( 'Products are matched between stores by SKU, and only sync while "Manage stock" is enabled. These published products are missing one or both of those, so they are currently being skipped — fix them here and they will start syncing on the next stock change or full sync.', 'wc-inventory-sync' ); ?></p>
+		<p class="description"><?php esc_html_e( '"Generate SKU" only sets a value on THIS site. Sync matches products by SKU across stores, so for it to actually link up, the same SKU still needs to exist on the matching product on your other store(s) too — check there once you\'ve generated or set one here.', 'wc-inventory-sync' ); ?></p>
 
 		<?php if ( $data['truncated'] ) : ?>
 			<p class="notice notice-warning" style="padding:8px 12px;">
@@ -685,6 +887,7 @@ class WCIS_Admin {
 					<th><?php esc_html_e( 'SKU', 'wc-inventory-sync' ); ?></th>
 					<th><?php esc_html_e( 'Manage stock', 'wc-inventory-sync' ); ?></th>
 					<th><?php esc_html_e( 'Why it\'s skipped', 'wc-inventory-sync' ); ?></th>
+					<th><?php esc_html_e( 'Quick fix', 'wc-inventory-sync' ); ?></th>
 				</tr>
 			</thead>
 			<tbody>
@@ -695,6 +898,25 @@ class WCIS_Admin {
 					<td><?php echo $item['sku'] ? '<code>' . esc_html( $item['sku'] ) . '</code>' : '<em>' . esc_html__( 'missing', 'wc-inventory-sync' ) . '</em>'; ?></td>
 					<td><?php echo $item['manages'] ? esc_html__( 'Yes', 'wc-inventory-sync' ) : esc_html__( 'No', 'wc-inventory-sync' ); ?></td>
 					<td><?php echo esc_html( implode( '; ', $item['reasons'] ) ); ?></td>
+					<td>
+						<?php if ( ! $item['sku'] ) : ?>
+							<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin-bottom:4px;">
+								<?php wp_nonce_field( 'wcis_generate_sku' ); ?>
+								<input type="hidden" name="action" value="wcis_generate_sku" />
+								<input type="hidden" name="product_id" value="<?php echo esc_attr( $item['id'] ); ?>" />
+								<button class="button button-small" title="<?php esc_attr_e( 'Sets AUTOGEN-<id> as the SKU on this site only.', 'wc-inventory-sync' ); ?>"><?php esc_html_e( 'Generate SKU', 'wc-inventory-sync' ); ?></button>
+							</form>
+						<?php endif; ?>
+						<?php if ( ! $item['manages'] ) : ?>
+							<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+								<?php wp_nonce_field( 'wcis_enable_stock_management' ); ?>
+								<input type="hidden" name="action" value="wcis_enable_stock_management" />
+								<input type="hidden" name="product_id" value="<?php echo esc_attr( $item['id'] ); ?>" />
+								<input type="number" min="0" step="1" name="quantity" placeholder="<?php esc_attr_e( 'Qty', 'wc-inventory-sync' ); ?>" required style="width:70px;" />
+								<button class="button button-small"><?php esc_html_e( 'Enable + Save Qty', 'wc-inventory-sync' ); ?></button>
+							</form>
+						<?php endif; ?>
+					</td>
 				</tr>
 			<?php endforeach; ?>
 			</tbody>

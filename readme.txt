@@ -2,7 +2,7 @@
 Requires at least: 6.0
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.0.4
+Stable tag: 1.0.5
 License: GPLv2 or later
 
 Keep stock quantities in sync between one master WooCommerce store and any number of subscriber stores, matched by SKU.
@@ -43,6 +43,10 @@ The request is queued and retried automatically (every 5 minutes, with backoff, 
 The master does, for its own broadcast logic. On a subscriber, an incoming update from the master will turn stock management on for that product automatically if it wasn't already, so the pushed quantity actually takes effect.
 
 == Changelog ==
+
+= 1.0.5 =
+* Added (master only): a "Subscriber Issues" tab — pick a subscriber store and see everything currently wrong involving just that store (failed pushes, sales it reported that couldn't be applied, anything still stuck in the retry queue).
+* Added to the "Not Synced" tab: a "Generate SKU" button for products missing one (sets AUTOGEN-<product id> on this site — the matching product on your other store(s) still needs the same value to actually sync), and an "Enable + Save Qty" action to turn on stock management and set a starting quantity in one step.
 
 = 1.0.4 =
 * Added auto-updates: the plugin now checks https://github.com/sterling5241/wc-inventory-sync for new releases and shows an "update available" notice on the Plugins page, same as a WordPress.org plugin. Uses the bundled Plugin Update Checker library (vendor/plugin-update-checker/), MIT licensed.

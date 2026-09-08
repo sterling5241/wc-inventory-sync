@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WC Inventory Sync
  * Description: Keeps product stock quantities in sync between one master WooCommerce store and any number of subscriber stores, matched by SKU. Sales on a subscriber store are reported to the master and re-broadcast to every other subscriber; any stock change on the master is pushed to all subscribers.
- * Version: 1.0.4
+ * Version: 1.0.5
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * WC requires at least: 7.0
@@ -13,7 +13,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'WCIS_VERSION', '1.0.4' );
+define( 'WCIS_VERSION', '1.0.5' );
 define( 'WCIS_FILE', __FILE__ );
 define( 'WCIS_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WCIS_URL', plugin_dir_url( __FILE__ ) );

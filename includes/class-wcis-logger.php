@@ -70,6 +70,10 @@ class WCIS_Logger {
 			$where   .= ' AND status = %s';
 			$params[] = $args['status'];
 		}
+		if ( ! empty( $args['remote_name'] ) ) {
+			$where   .= ' AND remote_name = %s';
+			$params[] = $args['remote_name'];
+		}
 
 		$sql      = "SELECT * FROM {$table} {$where} ORDER BY id DESC LIMIT %d OFFSET %d";
 		$params[] = $per_page;
@@ -91,6 +95,10 @@ class WCIS_Logger {
 		if ( ! empty( $args['status'] ) ) {
 			$where   .= ' AND status = %s';
 			$params[] = $args['status'];
+		}
+		if ( ! empty( $args['remote_name'] ) ) {
+			$where   .= ' AND remote_name = %s';
+			$params[] = $args['remote_name'];
 		}
 
 		$sql = "SELECT COUNT(*) FROM {$table} {$where}";
