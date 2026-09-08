@@ -116,4 +116,63 @@ class WCIS_Diagnostics {
 			'truncated' => count( $ids ) === $limit_scan,
 		);
 	}
+
+	/**
+	 * Every individually-syncable product/variation on this site, working
+	 * or not — used by Manual Match's master-side picker so ANY master
+	 * product can be chosen as a match source, not just ones currently
+	 * broken or ones that happen to have failed against whichever
+	 * subscriber is selected. A product that's already fully working
+	 * (has a SKU, syncs fine to every other subscriber) still needs to be
+	 * pickable here when you're linking it up to one more subscriber.
+	 *
+	 * Same eligibility rule WCIS_Master uses to decide what to broadcast:
+	 * simple products and variations always count; a variable product's
+	 * parent only counts when IT manages its own (shared-pool) stock —
+	 * otherwise its variations are the syncable units, and they're
+	 * already separate rows in this same scan.
+	 */
+	public static function get_all_products( $limit_scan = 2000 ) {
+		global $wpdb;
+
+		$ids = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT ID FROM {$wpdb->posts}
+				 WHERE post_type IN ('product','product_variation')
+				 AND post_status = 'publish'
+				 ORDER BY ID ASC
+				 LIMIT %d",
+				$limit_scan
+			)
+		);
+
+		$items = array();
+		foreach ( $ids as $id ) {
+			$product = wc_get_product( $id );
+			if ( ! $product ) {
+				continue;
+			}
+			if ( $product->is_type( array( 'grouped', 'external' ) ) ) {
+				continue;
+			}
+			if ( $product->is_type( 'variable' ) && ! $product->managing_stock() ) {
+				continue;
+			}
+
+			$items[] = array(
+				'id'      => $product->get_id(),
+				'edit_id' => $product->is_type( 'variation' ) ? $product->get_parent_id() : $product->get_id(),
+				'name'    => $product->get_name(),
+				'type'    => $product->get_type(),
+				'sku'     => $product->get_sku(),
+				'manages' => $product->managing_stock(),
+			);
+		}
+
+		return array(
+			'items'     => $items,
+			'scanned'   => count( $ids ),
+			'truncated' => count( $ids ) === $limit_scan,
+		);
+	}
 }

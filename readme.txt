@@ -2,7 +2,7 @@
 Requires at least: 6.0
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.0.11
+Stable tag: 1.0.12
 License: GPLv2 or later
 
 Keep stock quantities in sync between one master WooCommerce store and any number of subscriber stores, matched by SKU.
@@ -43,6 +43,10 @@ The request is queued and retried automatically (every 5 minutes, with backoff, 
 The master does, for its own broadcast logic. On a subscriber, an incoming update from the master will turn stock management on for that product automatically if it wasn't already, so the pushed quantity actually takes effect.
 
 == Changelog ==
+
+= 1.0.12 =
+* Fixed: Manual Match (master side) now lists the master's ENTIRE catalog as possible match sources, not just not-synced or recently-failed items. A product you already matched to one subscriber was disappearing from the picker when trying to match it to a different subscriber, since it was no longer "broken" by either of the previous two narrower definitions.
+* New WCIS_Diagnostics::get_all_products() backs this (same product-type eligibility rule used everywhere else: simple products and variations always count, a variable parent only counts when it manages its own shared stock).
 
 = 1.0.11 =
 * Fixed: Manual Match (master side) now also includes master products that recently failed to sync to the selected subscriber, not just products that are unsynced on the master itself. Most failing products are already perfectly fine on the master (SKU set, stock management on, syncing everywhere else) — they were never showing up as matchable before because they had nothing wrong with them locally.

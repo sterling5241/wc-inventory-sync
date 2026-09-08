@@ -1155,51 +1155,28 @@ class WCIS_Admin {
 		</form>
 
 		<?php
-		$local_data  = WCIS_Diagnostics::get_unsynced_products();
-		$local_items = $local_data['issues']; // Not-synced on the master itself (missing SKU/stock mgmt).
-
-		// Also pull in master products that recently FAILED to reach this
-		// specific subscriber (e.g. "no product with this SKU there").
-		// These are usually perfectly fine on the master — they have a SKU,
-		// stock management is on, they sync everywhere else — so they'd
-		// never show up in the master's own not-synced list above. They're
-		// exactly the products that need matching help against this one
-		// subscriber, so they belong in this dropdown too.
-		$seen_ids = array();
-		foreach ( $local_items as $li ) {
-			$seen_ids[ $li['id'] ] = true;
-		}
-		$failed_rows = WCIS_Logger::get_recent(
-			array(
-				'remote_name' => $selected->name,
-				'status'      => 'error',
-				'per_page'    => 200,
-			)
-		);
-		foreach ( $failed_rows as $row ) {
-			if ( 'update_stock' !== $row->event || ! $row->product_id || isset( $seen_ids[ $row->product_id ] ) ) {
-				continue;
-			}
-			$product = wc_get_product( $row->product_id );
-			if ( ! $product ) {
-				continue;
-			}
-			$seen_ids[ $row->product_id ] = true;
-			$local_items[]                = array(
-				'id'      => $product->get_id(),
-				'edit_id' => $product->is_type( 'variation' ) ? $product->get_parent_id() : $product->get_id(),
-				'name'    => $product->get_name(),
-				'type'    => $product->get_type(),
-				'sku'     => $product->get_sku(),
-				'manages' => $product->managing_stock(),
-				'reasons' => array( sprintf( /* translators: 1: subscriber name, 2: error message */ __( 'Failed to sync to %1$s: %2$s', 'wc-inventory-sync' ), $selected->name, $row->message ) ),
-			);
-		}
+		// The master's whole catalog, not just its not-synced items -- a
+		// product can already be working perfectly (SKU set, syncing fine
+		// to every other subscriber) and still need to be picked here to
+		// link it up to this particular one.
+		$local_data  = WCIS_Diagnostics::get_all_products();
+		$local_items = $local_data['items'];
 		?>
 
 		<?php if ( empty( $local_items ) ) : ?>
-			<p><?php echo esc_html( sprintf( __( 'Nothing on the master is missing a SKU or stock management, and nothing has recently failed to sync to %s.', 'wc-inventory-sync' ), $selected->name ) ); ?></p>
+			<p><?php esc_html_e( 'No syncable products found on the master.', 'wc-inventory-sync' ); ?></p>
 			<?php return; ?>
+		<?php endif; ?>
+		<?php if ( $local_data['truncated'] ) : ?>
+			<p class="notice notice-warning" style="padding:8px 12px;">
+				<?php
+				printf(
+					/* translators: %d: number of products scanned */
+					esc_html__( 'This list stops after the first %d products for performance — search the dropdown by typing to jump to a specific item, or use the SKU field on the product itself if it\'s not listed.', 'wc-inventory-sync' ),
+					(int) $local_data['scanned']
+				);
+				?>
+			</p>
 		<?php endif; ?>
 
 		<?php $remote = WCIS_Http_Client::post( WCIS_Http_Client::build_url( $selected->site_url, 'not-synced' ), $selected->api_key, $selected->api_secret, array(), 20 ); ?>
