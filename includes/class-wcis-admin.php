@@ -26,6 +26,18 @@ class WCIS_Admin {
 		add_action( 'admin_post_wcis_enable_stock_management', array( __CLASS__, 'handle_enable_stock_management' ) );
 		add_action( 'admin_post_wcis_apply_local_sku', array( __CLASS__, 'handle_apply_local_sku' ) );
 		add_action( 'admin_post_wcis_push_sku_to_subscriber', array( __CLASS__, 'handle_push_sku_to_subscriber' ) );
+
+		add_filter( 'plugin_action_links_' . plugin_basename( WCIS_FILE ), array( __CLASS__, 'add_settings_link' ) );
+	}
+
+	/**
+	 * Adds a "Settings" link to this plugin's row on the Plugins page,
+	 * next to Deactivate.
+	 */
+	public static function add_settings_link( $links ) {
+		$settings_link = '<a href="' . esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG ) ) . '">' . esc_html__( 'Settings', 'wc-inventory-sync' ) . '</a>';
+		array_unshift( $links, $settings_link );
+		return $links;
 	}
 
 	public static function add_menu() {
