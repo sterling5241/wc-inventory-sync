@@ -204,4 +204,52 @@ class WCIS_Subscriber {
 			'new_quantity' => (int) $new_stock,
 		);
 	}
+
+	/**
+	 * Apply a SKU the master assigned to one of THIS site's own products,
+	 * from the master's Manual Match tab (used when the same product exists
+	 * on both stores under different — or no — SKUs, so it never matched up
+	 * automatically). Refuses to overwrite a product that already has a
+	 * SKU, and refuses a SKU already used by a different product here —
+	 * both cases need a human to sort out rather than silently clobbering
+	 * something.
+	 */
+	public static function apply_matched_sku( $params ) {
+		$product_id = isset( $params['product_id'] ) ? absint( $params['product_id'] ) : 0;
+		$sku        = isset( $params['sku'] ) ? sanitize_text_field( $params['sku'] ) : '';
+
+		if ( ! $product_id || ! $sku ) {
+			return new WP_Error( 'wcis_bad_request', 'product_id and sku are required.', array( 'status' => 400 ) );
+		}
+
+		$product = wc_get_product( $product_id );
+		if ( ! $product ) {
+			return new WP_Error( 'wcis_unknown_product', 'No product with this ID found on this store.', array( 'status' => 404 ) );
+		}
+
+		if ( $product->get_sku() ) {
+			return new WP_Error( 'wcis_sku_exists', 'This product already has a SKU on this store.', array( 'status' => 409 ) );
+		}
+
+		$taken_by = wc_get_product_id_by_sku( $sku );
+		if ( $taken_by && (int) $taken_by !== $product_id ) {
+			return new WP_Error( 'wcis_sku_taken', 'That SKU is already used by a different product on this store.', array( 'status' => 409 ) );
+		}
+
+		$product->set_sku( $sku );
+		$product->save();
+
+		WCIS_Logger::log(
+			array(
+				'direction'  => 'incoming',
+				'event'      => 'sku_match',
+				'sku'        => $sku,
+				'product_id' => $product_id,
+				'status'     => 'success',
+				'message'    => 'SKU assigned via manual match from the master.',
+			)
+		);
+
+		return array( 'sku' => $sku, 'product_id' => $product_id );
+	}
 }

@@ -70,6 +70,20 @@ class WCIS_REST_API {
 				'permission_callback' => array( __CLASS__, 'verify_request' ),
 			)
 		);
+
+		// Subscriber-side: master assigns a specific SKU to one of the
+		// subscriber's own products, from the Manual Match tab. Only the
+		// master ever writes to a subscriber this way — never the reverse,
+		// same trust direction as update-stock.
+		register_rest_route(
+			self::NAMESPACE_V1,
+			'/apply-sku',
+			array(
+				'methods'             => 'POST',
+				'callback'            => array( __CLASS__, 'handle_apply_sku' ),
+				'permission_callback' => array( __CLASS__, 'verify_request' ),
+			)
+		);
 	}
 
 	/**
@@ -198,5 +212,19 @@ class WCIS_REST_API {
 
 	public static function handle_not_synced( WP_REST_Request $request ) {
 		return new WP_REST_Response( array_merge( array( 'ok' => true ), WCIS_Diagnostics::get_unsynced_products() ), 200 );
+	}
+
+	public static function handle_apply_sku( WP_REST_Request $request ) {
+		if ( 'subscriber' !== get_option( 'wcis_role', '' ) ) {
+			return new WP_Error( 'wcis_wrong_role', 'This site is not configured as a subscriber.', array( 'status' => 400 ) );
+		}
+
+		$params = $request->get_json_params();
+		$result = WCIS_Subscriber::apply_matched_sku( is_array( $params ) ? $params : array() );
+
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		return new WP_REST_Response( $result, 200 );
 	}
 }

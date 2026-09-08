@@ -24,6 +24,8 @@ class WCIS_Admin {
 		add_action( 'admin_post_wcis_requeue_outbox', array( __CLASS__, 'handle_requeue_outbox' ) );
 		add_action( 'admin_post_wcis_generate_sku', array( __CLASS__, 'handle_generate_sku' ) );
 		add_action( 'admin_post_wcis_enable_stock_management', array( __CLASS__, 'handle_enable_stock_management' ) );
+		add_action( 'admin_post_wcis_apply_local_sku', array( __CLASS__, 'handle_apply_local_sku' ) );
+		add_action( 'admin_post_wcis_push_sku_to_subscriber', array( __CLASS__, 'handle_push_sku_to_subscriber' ) );
 	}
 
 	public static function add_menu() {
@@ -251,6 +253,112 @@ class WCIS_Admin {
 		self::redirect_back( 'not_synced', array( 'wcis_notice' => 'stock_enabled' ) );
 	}
 
+	/**
+	 * Subscriber-side half of Manual Match: apply a SKU value copied from
+	 * the master's item straight to one of THIS site's own products. Pure
+	 * local write, no REST call needed — the value was already fetched
+	 * from the master to build the dropdown.
+	 */
+	public static function handle_apply_local_sku() {
+		self::check_cap();
+		check_admin_referer( 'wcis_apply_local_sku' );
+
+		$product_id = isset( $_POST['product_id'] ) ? absint( $_POST['product_id'] ) : 0;
+		$sku        = isset( $_POST['sku'] ) ? sanitize_text_field( wp_unslash( $_POST['sku'] ) ) : '';
+		$product    = $product_id ? wc_get_product( $product_id ) : false;
+
+		if ( ! $product || ! $sku ) {
+			self::redirect_back( 'manual_match', array( 'wcis_notice' => 'error' ) );
+		}
+		if ( $product->get_sku() ) {
+			self::redirect_back( 'manual_match', array( 'wcis_notice' => 'sku_exists' ) );
+		}
+		$taken_by = wc_get_product_id_by_sku( $sku );
+		if ( $taken_by && (int) $taken_by !== $product_id ) {
+			self::redirect_back( 'manual_match', array( 'wcis_notice' => 'error' ) );
+		}
+
+		$product->set_sku( $sku );
+		$product->save();
+
+		WCIS_Logger::log(
+			array(
+				'direction'  => 'incoming',
+				'event'      => 'sku_match',
+				'sku'        => $sku,
+				'product_id' => $product_id,
+				'status'     => 'success',
+				'message'    => 'SKU assigned via manual match against the master.',
+			)
+		);
+
+		self::redirect_back( 'manual_match', array( 'wcis_notice' => 'match_applied' ) );
+	}
+
+	/**
+	 * Master-side half of Manual Match: make sure this site's own chosen
+	 * item has a SKU (generating one if it doesn't — a master is always
+	 * allowed to assign its own SKUs), then push that value to a specific
+	 * product on the chosen subscriber via the /apply-sku REST route.
+	 */
+	public static function handle_push_sku_to_subscriber() {
+		self::check_cap();
+		check_admin_referer( 'wcis_push_sku_to_subscriber' );
+
+		$product_id        = isset( $_POST['product_id'] ) ? absint( $_POST['product_id'] ) : 0;
+		$subscriber_id     = isset( $_POST['subscriber_id'] ) ? absint( $_POST['subscriber_id'] ) : 0;
+		$remote_product_id = isset( $_POST['remote_product_id'] ) ? absint( $_POST['remote_product_id'] ) : 0;
+
+		$product    = $product_id ? wc_get_product( $product_id ) : false;
+		$subscriber = $subscriber_id ? WCIS_Master::get_subscriber( $subscriber_id ) : false;
+
+		if ( ! $product || ! $subscriber || ! $remote_product_id ) {
+			self::redirect_back( 'manual_match', array( 'wcis_notice' => 'error', 'sub_id' => $subscriber_id ) );
+		}
+
+		$sku = $product->get_sku();
+		if ( ! $sku ) {
+			$candidate = 'AUTOGEN-' . $product_id;
+			$taken_by  = wc_get_product_id_by_sku( $candidate );
+			if ( $taken_by && (int) $taken_by !== $product_id ) {
+				self::redirect_back( 'manual_match', array( 'wcis_notice' => 'error', 'sub_id' => $subscriber_id ) );
+			}
+			$product->set_sku( $candidate );
+			$product->save();
+			$sku = $candidate;
+		}
+
+		$result = WCIS_Http_Client::post(
+			WCIS_Http_Client::build_url( $subscriber->site_url, 'apply-sku' ),
+			$subscriber->api_key,
+			$subscriber->api_secret,
+			array(
+				'product_id' => $remote_product_id,
+				'sku'        => $sku,
+			)
+		);
+
+		WCIS_Logger::log(
+			array(
+				'direction'   => 'outgoing',
+				'event'       => 'sku_match',
+				'remote_name' => $subscriber->name,
+				'sku'         => $sku,
+				'product_id'  => $product_id,
+				'status'      => $result['ok'] ? 'success' : 'error',
+				'message'     => $result['ok'] ? '' : $result['error'],
+			)
+		);
+
+		self::redirect_back(
+			'manual_match',
+			array(
+				'wcis_notice' => $result['ok'] ? 'match_applied' : 'connection_failed',
+				'sub_id'      => $subscriber_id,
+			)
+		);
+	}
+
 	public static function notices() {
 		if ( empty( $_GET['page'] ) || self::PAGE_SLUG !== $_GET['page'] || empty( $_GET['wcis_notice'] ) ) {
 			return;
@@ -267,6 +375,7 @@ class WCIS_Admin {
 			'sku_generated'      => array( 'success', __( 'SKU generated on this site. Remember to set the same SKU on the matching product on your other store(s) — that\'s what actually links them for sync.', 'wc-inventory-sync' ) ),
 			'sku_exists'         => array( 'error', __( 'That product already has a SKU.', 'wc-inventory-sync' ) ),
 			'stock_enabled'      => array( 'success', __( 'Stock management enabled and quantity saved.', 'wc-inventory-sync' ) ),
+			'match_applied'      => array( 'success', __( 'Matched — the SKU is now set on both products, so they\'ll sync from here on.', 'wc-inventory-sync' ) ),
 			'error'              => array( 'error', __( 'Something went wrong. Please check the form and try again.', 'wc-inventory-sync' ) ),
 		);
 		if ( isset( $map[ $notice ] ) ) {
@@ -295,6 +404,9 @@ class WCIS_Admin {
 					<a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&tab=connection' ) ); ?>" class="nav-tab <?php echo 'connection' === $tab ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Master Connection', 'wc-inventory-sync' ); ?></a>
 				<?php endif; ?>
 				<a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&tab=not_synced' ) ); ?>" class="nav-tab <?php echo 'not_synced' === $tab ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Not Synced', 'wc-inventory-sync' ); ?></a>
+				<?php if ( 'master' === $role || 'subscriber' === $role ) : ?>
+					<a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&tab=manual_match' ) ); ?>" class="nav-tab <?php echo 'manual_match' === $tab ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Manual Match', 'wc-inventory-sync' ); ?></a>
+				<?php endif; ?>
 				<a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&tab=log' ) ); ?>" class="nav-tab <?php echo 'log' === $tab ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Sync Log', 'wc-inventory-sync' ); ?></a>
 				<a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&tab=outbox' ) ); ?>" class="nav-tab <?php echo 'outbox' === $tab ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Retry Queue', 'wc-inventory-sync' ); ?></a>
 			</h2>
@@ -312,6 +424,9 @@ class WCIS_Admin {
 						break;
 					case 'not_synced':
 						self::render_not_synced_tab();
+						break;
+					case 'manual_match':
+						self::render_manual_match_tab();
 						break;
 					case 'log':
 						self::render_log_tab();
@@ -881,6 +996,222 @@ class WCIS_Admin {
 			);
 			echo '</p>';
 		}
+	}
+
+	/**
+	 * Manual Match: pair up a not-synced item on this site with the
+	 * matching item on the other side, so the same SKU gets assigned to
+	 * both and they start syncing. Available on both roles, but only the
+	 * master ever writes to another site's products — same trust
+	 * direction as the rest of the plugin (report-change/update-stock) —
+	 * so the two directions work differently:
+	 *
+	 * - Subscriber: browse the master's not-synced items (read-only,
+	 *   fetched live) that already have a SKU, and copy one onto a local
+	 *   not-synced item. Pure local write.
+	 * - Master: pick a subscriber, browse ITS not-synced items (fetched
+	 *   live), pick a local master item as the source (a SKU is generated
+	 *   for it first if it doesn't have one — a master can always assign
+	 *   its own SKUs), and push that value to the chosen subscriber
+	 *   product over /apply-sku.
+	 */
+	protected static function render_manual_match_tab() {
+		$role = get_option( 'wcis_role', '' );
+
+		if ( 'subscriber' === $role ) {
+			self::render_manual_match_as_subscriber();
+		} elseif ( 'master' === $role ) {
+			self::render_manual_match_as_master();
+		} else {
+			echo '<p>' . esc_html__( 'Set a role on the Setup tab first.', 'wc-inventory-sync' ) . '</p>';
+		}
+	}
+
+	protected static function render_manual_match_as_subscriber() {
+		$master_url    = get_option( 'wcis_master_url', '' );
+		$master_key    = get_option( 'wcis_master_key', '' );
+		$master_secret = get_option( 'wcis_master_secret', '' );
+
+		if ( ! $master_url || ! $master_key || ! $master_secret ) {
+			echo '<p>' . esc_html__( 'Connect to your master store on the Master Connection tab first.', 'wc-inventory-sync' ) . '</p>';
+			return;
+		}
+
+		$local_data    = WCIS_Diagnostics::get_unsynced_products();
+		$local_targets = array_values(
+			array_filter(
+				$local_data['issues'],
+				function ( $item ) {
+					return empty( $item['sku'] );
+				}
+			)
+		);
+		?>
+		<p><?php esc_html_e( 'Pair one of this site\'s items with the matching item on the master, and its SKU gets copied here so they start syncing.', 'wc-inventory-sync' ); ?></p>
+
+		<?php if ( empty( $local_targets ) ) : ?>
+			<p><?php esc_html_e( 'Nothing on this site is missing a SKU right now.', 'wc-inventory-sync' ); ?></p>
+			<?php return; ?>
+		<?php endif; ?>
+
+		<?php $remote = WCIS_Http_Client::post( WCIS_Http_Client::build_url( $master_url, 'not-synced' ), $master_key, $master_secret, array(), 20 ); ?>
+		<?php if ( ! $remote['ok'] ) : ?>
+			<p><span style="color:#b32d2e"><?php esc_html_e( 'Could not fetch the master\'s list right now:', 'wc-inventory-sync' ); ?></span> <?php echo esc_html( $remote['error'] ); ?></p>
+			<?php return; ?>
+		<?php endif; ?>
+
+		<?php
+		$remote_issues   = isset( $remote['body']['issues'] ) && is_array( $remote['body']['issues'] ) ? $remote['body']['issues'] : array();
+		$remote_with_sku = array_values(
+			array_filter(
+				$remote_issues,
+				function ( $item ) {
+					return ! empty( $item['sku'] );
+				}
+			)
+		);
+		?>
+		<?php if ( empty( $remote_with_sku ) ) : ?>
+			<p><?php esc_html_e( 'None of the master\'s not-synced items have a SKU to copy yet — set one on the master first (its own Not Synced tab), then come back here.', 'wc-inventory-sync' ); ?></p>
+			<?php return; ?>
+		<?php endif; ?>
+
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+			<?php wp_nonce_field( 'wcis_apply_local_sku' ); ?>
+			<input type="hidden" name="action" value="wcis_apply_local_sku" />
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="wcis_master_item"><?php esc_html_e( "Master's item", 'wc-inventory-sync' ); ?></label></th>
+					<td>
+						<select name="sku" id="wcis_master_item" required>
+							<option value=""><?php esc_html_e( '— choose —', 'wc-inventory-sync' ); ?></option>
+							<?php foreach ( $remote_with_sku as $item ) : ?>
+								<option value="<?php echo esc_attr( $item['sku'] ); ?>"><?php echo esc_html( ( ! empty( $item['name'] ) ? $item['name'] : '' ) . ' — ' . $item['sku'] ); ?></option>
+							<?php endforeach; ?>
+						</select>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="wcis_local_item"><?php esc_html_e( "This site's item", 'wc-inventory-sync' ); ?></label></th>
+					<td>
+						<select name="product_id" id="wcis_local_item" required>
+							<option value=""><?php esc_html_e( '— choose —', 'wc-inventory-sync' ); ?></option>
+							<?php foreach ( $local_targets as $item ) : ?>
+								<option value="<?php echo esc_attr( $item['id'] ); ?>"><?php echo esc_html( $item['name'] ? $item['name'] : ( '#' . $item['id'] ) ); ?></option>
+							<?php endforeach; ?>
+						</select>
+					</td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Match', 'wc-inventory-sync' ) ); ?>
+		</form>
+		<?php
+	}
+
+	protected static function render_manual_match_as_master() {
+		$subscribers = WCIS_Master::get_subscribers();
+		if ( empty( $subscribers ) ) {
+			echo '<p>' . esc_html__( 'No subscriber stores yet.', 'wc-inventory-sync' ) . '</p>';
+			return;
+		}
+
+		$selected_id = isset( $_GET['sub_id'] ) ? absint( $_GET['sub_id'] ) : (int) $subscribers[0]->id;
+		$selected    = null;
+		foreach ( $subscribers as $s ) {
+			if ( (int) $s->id === $selected_id ) {
+				$selected = $s;
+				break;
+			}
+		}
+		if ( ! $selected ) {
+			$selected    = $subscribers[0];
+			$selected_id = (int) $selected->id;
+		}
+		?>
+		<p><?php esc_html_e( "Pair one of the master's items with the matching item on a subscriber. The master's SKU (generated first if it doesn't have one yet) gets pushed to that subscriber's product, so they start syncing.", 'wc-inventory-sync' ); ?></p>
+
+		<form method="get" style="margin-bottom:16px;">
+			<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>" />
+			<input type="hidden" name="tab" value="manual_match" />
+			<label for="wcis_sub_select"><?php esc_html_e( 'Subscriber store:', 'wc-inventory-sync' ); ?></label>
+			<select name="sub_id" id="wcis_sub_select">
+				<?php foreach ( $subscribers as $s ) : ?>
+					<option value="<?php echo esc_attr( $s->id ); ?>" <?php selected( (int) $s->id, $selected_id ); ?>><?php echo esc_html( $s->name ); ?></option>
+				<?php endforeach; ?>
+			</select>
+			<button class="button"><?php esc_html_e( 'Load', 'wc-inventory-sync' ); ?></button>
+		</form>
+
+		<?php
+		$local_data  = WCIS_Diagnostics::get_unsynced_products();
+		$local_items = $local_data['issues']; // Source side: any not-synced master item, SKU or not.
+		?>
+
+		<?php if ( empty( $local_items ) ) : ?>
+			<p><?php esc_html_e( 'Nothing on the master is missing a SKU or stock management right now.', 'wc-inventory-sync' ); ?></p>
+			<?php return; ?>
+		<?php endif; ?>
+
+		<?php $remote = WCIS_Http_Client::post( WCIS_Http_Client::build_url( $selected->site_url, 'not-synced' ), $selected->api_key, $selected->api_secret, array(), 20 ); ?>
+		<?php if ( ! $remote['ok'] ) : ?>
+			<p><span style="color:#b32d2e"><?php echo esc_html( sprintf( __( 'Could not fetch %s\'s list right now:', 'wc-inventory-sync' ), $selected->name ) ); ?></span> <?php echo esc_html( $remote['error'] ); ?></p>
+			<?php return; ?>
+		<?php endif; ?>
+
+		<?php
+		$remote_issues  = isset( $remote['body']['issues'] ) && is_array( $remote['body']['issues'] ) ? $remote['body']['issues'] : array();
+		$remote_targets = array_values(
+			array_filter(
+				$remote_issues,
+				function ( $item ) {
+					return empty( $item['sku'] );
+				}
+			)
+		);
+		?>
+		<?php if ( empty( $remote_targets ) ) : ?>
+			<p><?php echo esc_html( sprintf( __( 'Nothing on %s is missing a SKU right now.', 'wc-inventory-sync' ), $selected->name ) ); ?></p>
+			<?php return; ?>
+		<?php endif; ?>
+
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+			<?php wp_nonce_field( 'wcis_push_sku_to_subscriber' ); ?>
+			<input type="hidden" name="action" value="wcis_push_sku_to_subscriber" />
+			<input type="hidden" name="subscriber_id" value="<?php echo esc_attr( $selected_id ); ?>" />
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="wcis_master_item2"><?php esc_html_e( "Master's item", 'wc-inventory-sync' ); ?></label></th>
+					<td>
+						<select name="product_id" id="wcis_master_item2" required>
+							<option value=""><?php esc_html_e( '— choose —', 'wc-inventory-sync' ); ?></option>
+							<?php foreach ( $local_items as $item ) : ?>
+								<option value="<?php echo esc_attr( $item['id'] ); ?>">
+									<?php
+									echo esc_html(
+										( $item['name'] ? $item['name'] : ( '#' . $item['id'] ) ) .
+										( $item['sku'] ? ' — ' . $item['sku'] : ' — ' . __( 'no SKU yet, one will be generated', 'wc-inventory-sync' ) )
+									);
+									?>
+								</option>
+							<?php endforeach; ?>
+						</select>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="wcis_remote_item"><?php echo esc_html( sprintf( __( "%s's item", 'wc-inventory-sync' ), $selected->name ) ); ?></label></th>
+					<td>
+						<select name="remote_product_id" id="wcis_remote_item" required>
+							<option value=""><?php esc_html_e( '— choose —', 'wc-inventory-sync' ); ?></option>
+							<?php foreach ( $remote_targets as $item ) : ?>
+								<option value="<?php echo esc_attr( $item['id'] ?? '' ); ?>"><?php echo esc_html( ! empty( $item['name'] ) ? $item['name'] : ( '#' . ( $item['id'] ?? '' ) ) ); ?></option>
+							<?php endforeach; ?>
+						</select>
+					</td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Match', 'wc-inventory-sync' ) ); ?>
+		</form>
+		<?php
 	}
 
 	protected static function render_outbox_tab() {
