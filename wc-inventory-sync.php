@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WC Inventory Sync
  * Description: Keeps product stock quantities in sync between one master WooCommerce store and any number of subscriber stores, matched by SKU. Sales on a subscriber store are reported to the master and re-broadcast to every other subscriber; any stock change on the master is pushed to all subscribers.
- * Version: 1.0.14
+ * Version: 1.1.0
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * WC requires at least: 7.0
@@ -15,7 +15,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'WCIS_VERSION', '1.0.14' );
+define( 'WCIS_VERSION', '1.1.0' );
 define( 'WCIS_FILE', __FILE__ );
 define( 'WCIS_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WCIS_URL', plugin_dir_url( __FILE__ ) );
@@ -31,6 +31,7 @@ require_once WCIS_DIR . 'includes/class-wcis-rest-api.php';
 require_once WCIS_DIR . 'includes/class-wcis-master.php';
 require_once WCIS_DIR . 'includes/class-wcis-subscriber.php';
 require_once WCIS_DIR . 'includes/class-wcis-cron.php';
+require_once WCIS_DIR . 'includes/class-wcis-google-sheets.php';
 require_once WCIS_DIR . 'includes/class-wcis-admin.php';
 
 // Self-hosted auto-updates via GitHub Releases (this plugin isn't on
@@ -50,6 +51,7 @@ if ( file_exists( WCIS_DIR . 'vendor/plugin-update-checker/plugin-update-checker
 
 register_activation_hook( __FILE__, array( 'WCIS_Install', 'activate' ) );
 register_deactivation_hook( __FILE__, array( 'WCIS_Cron', 'deactivate' ) );
+register_deactivation_hook( __FILE__, array( 'WCIS_Google_Sheets', 'deactivate' ) );
 
 /**
  * Main plugin bootstrap (singleton).
@@ -85,6 +87,7 @@ final class WCIS_Plugin {
 
 		WCIS_Install::maybe_upgrade();
 		WCIS_Cron::init();
+		WCIS_Google_Sheets::init();
 		WCIS_REST_API::init();
 		WCIS_Admin::init();
 

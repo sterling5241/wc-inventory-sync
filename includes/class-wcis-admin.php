@@ -26,6 +26,9 @@ class WCIS_Admin {
 		add_action( 'admin_post_wcis_enable_stock_management', array( __CLASS__, 'handle_enable_stock_management' ) );
 		add_action( 'admin_post_wcis_apply_local_sku', array( __CLASS__, 'handle_apply_local_sku' ) );
 		add_action( 'admin_post_wcis_push_sku_to_subscriber', array( __CLASS__, 'handle_push_sku_to_subscriber' ) );
+		add_action( 'admin_post_wcis_save_gsheets_settings', array( __CLASS__, 'handle_save_gsheets_settings' ) );
+		add_action( 'admin_post_wcis_test_gsheets', array( __CLASS__, 'handle_test_gsheets' ) );
+		add_action( 'admin_post_wcis_export_gsheets_now', array( __CLASS__, 'handle_export_gsheets_now' ) );
 
 		add_filter( 'plugin_action_links_' . plugin_basename( WCIS_FILE ), array( __CLASS__, 'add_settings_link' ) );
 	}
@@ -197,6 +200,57 @@ class WCIS_Admin {
 		check_admin_referer( 'wcis_requeue_outbox' );
 		WCIS_Outbox::requeue_failed();
 		self::redirect_back( 'outbox', array( 'wcis_notice' => 'requeued' ) );
+	}
+
+	public static function handle_save_gsheets_settings() {
+		self::check_cap();
+		check_admin_referer( 'wcis_save_gsheets_settings' );
+
+		update_option( 'wcis_gsheets_enabled', isset( $_POST['wcis_gsheets_enabled'] ) ? 1 : 0 );
+
+		$spreadsheet_input = isset( $_POST['spreadsheet_id'] ) ? trim( wp_unslash( $_POST['spreadsheet_id'] ) ) : '';
+		// Accept either a bare ID or the full Sheet URL and pull the ID out of it.
+		if ( preg_match( '#/spreadsheets/d/([a-zA-Z0-9-_]+)#', $spreadsheet_input, $m ) ) {
+			$spreadsheet_input = $m[1];
+		}
+		update_option( 'wcis_gsheets_spreadsheet_id', sanitize_text_field( $spreadsheet_input ) );
+		update_option( 'wcis_gsheets_sheet_name', isset( $_POST['sheet_name'] ) ? sanitize_text_field( wp_unslash( $_POST['sheet_name'] ) ) : 'Sync Log' );
+
+		// Only overwrite the stored credentials if something was actually
+		// pasted -- the textarea is left blank on reload so the private key
+		// isn't echoed back onto the page every time.
+		$json = isset( $_POST['service_account_json'] ) ? trim( wp_unslash( $_POST['service_account_json'] ) ) : '';
+		if ( $json ) {
+			update_option( 'wcis_gsheets_service_account_json', $json );
+			delete_transient( WCIS_Google_Sheets::TOKEN_TRANSIENT );
+		}
+
+		self::redirect_back( 'gsheets', array( 'wcis_notice' => 'settings_saved' ) );
+	}
+
+	public static function handle_test_gsheets() {
+		self::check_cap();
+		check_admin_referer( 'wcis_test_gsheets' );
+
+		$result = WCIS_Google_Sheets::test_connection();
+
+		update_option(
+			'wcis_gsheets_last_test',
+			array(
+				'ok'      => ! is_wp_error( $result ),
+				'message' => is_wp_error( $result ) ? $result->get_error_message() : 'A test row was added successfully.',
+				'time'    => time(),
+			)
+		);
+
+		self::redirect_back( 'gsheets', array( 'wcis_notice' => is_wp_error( $result ) ? 'gsheets_test_failed' : 'gsheets_test_ok' ) );
+	}
+
+	public static function handle_export_gsheets_now() {
+		self::check_cap();
+		check_admin_referer( 'wcis_export_gsheets_now' );
+		WCIS_Google_Sheets::export_pending( 2000 );
+		self::redirect_back( 'gsheets', array( 'wcis_notice' => 'gsheets_exported' ) );
 	}
 
 	/**
@@ -419,6 +473,9 @@ class WCIS_Admin {
 			'sku_exists'         => array( 'error', __( 'That product already has a SKU.', 'wc-inventory-sync' ) ),
 			'stock_enabled'      => array( 'success', __( 'Stock management enabled and quantity saved.', 'wc-inventory-sync' ) ),
 			'match_applied'      => array( 'success', __( 'Matched — the SKU is now set on both products, so they\'ll sync from here on.', 'wc-inventory-sync' ) ),
+			'gsheets_test_ok'    => array( 'success', __( 'Connected — check your sheet for the test row.', 'wc-inventory-sync' ) ),
+			'gsheets_test_failed' => array( 'error', __( 'Could not write to the sheet — see the error below.', 'wc-inventory-sync' ) ),
+			'gsheets_exported'   => array( 'success', __( 'Export ran. Check the sheet, and the status below.', 'wc-inventory-sync' ) ),
 			'error'              => array( 'error', __( 'Something went wrong. Please check the form and try again.', 'wc-inventory-sync' ) ),
 		);
 		if ( isset( $map[ $notice ] ) ) {
@@ -452,6 +509,7 @@ class WCIS_Admin {
 				<?php endif; ?>
 				<a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&tab=log' ) ); ?>" class="nav-tab <?php echo 'log' === $tab ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Sync Log', 'wc-inventory-sync' ); ?></a>
 				<a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&tab=outbox' ) ); ?>" class="nav-tab <?php echo 'outbox' === $tab ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Retry Queue', 'wc-inventory-sync' ); ?></a>
+				<a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&tab=gsheets' ) ); ?>" class="nav-tab <?php echo 'gsheets' === $tab ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Google Sheets', 'wc-inventory-sync' ); ?></a>
 			</h2>
 			<div class="wcis-tab-content" style="margin-top:20px;">
 				<?php
@@ -476,6 +534,9 @@ class WCIS_Admin {
 						break;
 					case 'outbox':
 						self::render_outbox_tab();
+						break;
+					case 'gsheets':
+						self::render_gsheets_tab();
 						break;
 					default:
 						self::render_setup_tab();
@@ -1298,6 +1359,94 @@ class WCIS_Admin {
 				<button class="button"><?php esc_html_e( 'Retry Failed Items Now', 'wc-inventory-sync' ); ?></button>
 			</form>
 		<?php endif; ?>
+		<?php
+	}
+
+	protected static function render_gsheets_tab() {
+		$enabled        = get_option( 'wcis_gsheets_enabled', 0 );
+		$spreadsheet_id = get_option( 'wcis_gsheets_spreadsheet_id', '' );
+		$sheet_name     = get_option( 'wcis_gsheets_sheet_name', 'Sync Log' );
+		$has_creds      = (bool) get_option( 'wcis_gsheets_service_account_json' );
+		$last_test      = get_option( 'wcis_gsheets_last_test', array() );
+		$last_export_at = get_option( 'wcis_gsheets_last_export_at', '' );
+		$last_error     = get_option( 'wcis_gsheets_last_error', '' );
+		$last_id        = (int) get_option( 'wcis_gsheets_last_exported_id', 0 );
+
+		global $wpdb;
+		$pending_count = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->prefix}wcis_log WHERE id > %d", $last_id ) );
+		?>
+		<p><?php esc_html_e( 'Every sync event logged here (the same rows as the Sync Log tab) is also batched out to a Google Sheet every 5 minutes, so you can view, share, or build reports on it outside of wp-admin.', 'wc-inventory-sync' ); ?></p>
+
+		<h2><?php esc_html_e( 'One-time Google setup', 'wc-inventory-sync' ); ?></h2>
+		<ol>
+			<li><?php esc_html_e( 'In Google Cloud Console, create a project (or use an existing one) and enable the "Google Sheets API".', 'wc-inventory-sync' ); ?></li>
+			<li><?php esc_html_e( 'Create a Service Account, then create a JSON key for it and download the file.', 'wc-inventory-sync' ); ?></li>
+			<li><?php esc_html_e( 'Open the JSON file, copy its entire contents, and paste it below.', 'wc-inventory-sync' ); ?></li>
+			<li><?php esc_html_e( 'In the JSON, find "client_email" — it looks like something@your-project.iam.gserviceaccount.com. Share your Google Sheet with that exact email address, as an Editor.', 'wc-inventory-sync' ); ?></li>
+			<li><?php esc_html_e( 'In the spreadsheet, make sure a tab with the exact name you\'ll enter below already exists (Google\'s API won\'t create it for you) — then paste the Spreadsheet ID (or the full URL) and that tab name below.', 'wc-inventory-sync' ); ?></li>
+		</ol>
+
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+			<?php wp_nonce_field( 'wcis_save_gsheets_settings' ); ?>
+			<input type="hidden" name="action" value="wcis_save_gsheets_settings" />
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><?php esc_html_e( 'Enabled', 'wc-inventory-sync' ); ?></th>
+					<td><label><input type="checkbox" name="wcis_gsheets_enabled" value="1" <?php checked( $enabled, 1 ); ?> /> <?php esc_html_e( 'Export to Google Sheets', 'wc-inventory-sync' ); ?></label></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="spreadsheet_id"><?php esc_html_e( 'Spreadsheet ID or URL', 'wc-inventory-sync' ); ?></label></th>
+					<td><input type="text" class="regular-text" name="spreadsheet_id" id="spreadsheet_id" value="<?php echo esc_attr( $spreadsheet_id ); ?>" placeholder="https://docs.google.com/spreadsheets/d/XXXXXXXX/edit" /></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="sheet_name"><?php esc_html_e( 'Tab name', 'wc-inventory-sync' ); ?></label></th>
+					<td><input type="text" class="regular-text" name="sheet_name" id="sheet_name" value="<?php echo esc_attr( $sheet_name ); ?>" placeholder="Sync Log" /></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="service_account_json"><?php esc_html_e( 'Service Account JSON', 'wc-inventory-sync' ); ?></label></th>
+					<td>
+						<textarea name="service_account_json" id="service_account_json" class="large-text code" rows="6" placeholder="<?php echo $has_creds ? esc_attr__( '(already saved — leave blank to keep it, paste new JSON to replace it)', 'wc-inventory-sync' ) : esc_attr__( 'Paste the full contents of the downloaded JSON key file here', 'wc-inventory-sync' ); ?>"></textarea>
+					</td>
+				</tr>
+			</table>
+			<?php submit_button( __( 'Save', 'wc-inventory-sync' ) ); ?>
+		</form>
+
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline">
+			<?php wp_nonce_field( 'wcis_test_gsheets' ); ?>
+			<input type="hidden" name="action" value="wcis_test_gsheets" />
+			<button class="button"><?php esc_html_e( 'Test Connection', 'wc-inventory-sync' ); ?></button>
+		</form>
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline">
+			<?php wp_nonce_field( 'wcis_export_gsheets_now' ); ?>
+			<input type="hidden" name="action" value="wcis_export_gsheets_now" />
+			<button class="button"><?php esc_html_e( 'Export Now', 'wc-inventory-sync' ); ?></button>
+		</form>
+
+		<?php if ( ! empty( $last_test ) ) : ?>
+			<p>
+				<?php
+				printf(
+					/* translators: 1: OK/Failed, 2: message, 3: time ago */
+					esc_html__( 'Last test: %1$s — %2$s (%3$s ago)', 'wc-inventory-sync' ),
+					$last_test['ok'] ? esc_html__( 'OK', 'wc-inventory-sync' ) : esc_html__( 'Failed', 'wc-inventory-sync' ),
+					esc_html( $last_test['message'] ),
+					esc_html( human_time_diff( $last_test['time'] ) )
+				);
+				?>
+			</p>
+		<?php endif; ?>
+
+		<p>
+			<strong><?php esc_html_e( 'Rows waiting to export:', 'wc-inventory-sync' ); ?></strong> <?php echo esc_html( $pending_count ); ?>
+			&nbsp;&nbsp;
+			<strong><?php esc_html_e( 'Last successful export:', 'wc-inventory-sync' ); ?></strong> <?php echo $last_export_at ? esc_html( human_time_diff( strtotime( $last_export_at ) ) . ' ago' ) : esc_html__( 'never', 'wc-inventory-sync' ); ?>
+		</p>
+		<?php if ( $last_error ) : ?>
+			<p><strong><?php esc_html_e( 'Last export error:', 'wc-inventory-sync' ); ?></strong> <span style="color:#b32d2e"><?php echo esc_html( $last_error ); ?></span></p>
+		<?php endif; ?>
+
+		<p class="description"><?php esc_html_e( 'Note: the Service Account JSON is stored in this site\'s database like the other connection secrets in this plugin — keep normal WordPress security hygiene (strong admin passwords, updated core/plugins) since anyone with database access could read it.', 'wc-inventory-sync' ); ?></p>
 		<?php
 	}
 }

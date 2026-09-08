@@ -25,7 +25,17 @@ $options = array(
 	'wcis_master_secret',
 	'wcis_last_connection_check',
 	'wcis_uninstall_cleanup',
+	'wcis_gsheets_enabled',
+	'wcis_gsheets_spreadsheet_id',
+	'wcis_gsheets_sheet_name',
+	'wcis_gsheets_service_account_json',
+	'wcis_gsheets_header_written',
+	'wcis_gsheets_last_exported_id',
+	'wcis_gsheets_last_export_at',
+	'wcis_gsheets_last_error',
+	'wcis_gsheets_last_test',
 );
+delete_transient( 'wcis_gsheets_access_token' );
 foreach ( $options as $option ) {
 	delete_option( $option );
 }

@@ -2,7 +2,7 @@
 Requires at least: 6.0
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.0.14
+Stable tag: 1.1.0
 License: GPLv2 or later
 
 Keep stock quantities in sync between one master WooCommerce store and any number of subscriber stores, matched by SKU.
@@ -43,6 +43,10 @@ The request is queued and retried automatically (every 5 minutes, with backoff, 
 The master does, for its own broadcast logic. On a subscriber, an incoming update from the master will turn stock management on for that product automatically if it wasn't already, so the pushed quantity actually takes effect.
 
 == Changelog ==
+
+= 1.1.0 =
+* Added: export the Sync Log to a Google Sheet. New "Google Sheets" tab — connect a Google Service Account (JSON key, no OAuth login screen), pick a spreadsheet + tab, and every sync event gets batched out every 5 minutes (plus a manual "Export Now" and a "Test Connection"). Batched rather than one API call per event, so a big reconciliation burst doesn't hammer Google's rate limits.
+* New WCIS_Google_Sheets class handles the service-account JWT auth and the Sheets API append call directly (no external library).
 
 = 1.0.14 =
 * Fixed: a Manual Match only set the SKU — the matched product sat at whatever quantity it already had until the next reconciliation cycle. Both directions now also push the correct starting quantity at match time: master→subscriber pushes the master's current stock right after the SKU lands; subscriber→master applies the quantity captured from the master's item when the match was made.
