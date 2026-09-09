@@ -2,7 +2,7 @@
 Requires at least: 6.0
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.1.1
+Stable tag: 1.1.2
 License: GPLv2 or later
 
 Keep stock quantities in sync between one master WooCommerce store and any number of subscriber stores, matched by SKU.
@@ -43,6 +43,10 @@ The request is queued and retried automatically (every 5 minutes, with backoff, 
 The master does, for its own broadcast logic. On a subscriber, an incoming update from the master will turn stock management on for that product automatically if it wasn't already, so the pushed quantity actually takes effect.
 
 == Changelog ==
+
+= 1.1.2 =
+* Massively reduced Sync Log / Google Sheets noise from reconciliation: an incoming update-stock that doesn't change the quantity or stock status is no longer logged at all (was logging every SKU every ~15 minutes regardless of whether anything moved).
+* A subscriber not carrying a given product (404, "no product with this SKU") is no longer logged on either side, on the real-time push path — it's a permanent, expected state for a partial catalog, not an event. (A subscriber's own sale-report to the master for a SKU it can't find still logs — that's a rare, real, actionable mismatch worth seeing.)
 
 = 1.1.1 =
 * The Google Sheets export interval is now configurable (Google Sheets tab), instead of hardcoded to 5 minutes — default 15, minimum 5.

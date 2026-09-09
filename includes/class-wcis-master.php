@@ -255,6 +255,16 @@ class WCIS_Master {
 			);
 		}
 
+		// Not logged: a subscriber not carrying a given product (404) is a
+		// permanent, expected state, not an event -- every real stock
+		// change on the master broadcasts to every subscriber regardless of
+		// whether they stock that item, so this would otherwise log on
+		// every single one of those, forever, for every subscriber with a
+		// partial catalog.
+		if ( 404 === (int) $result['code'] ) {
+			return;
+		}
+
 		WCIS_Logger::log(
 			array(
 				'direction'   => 'outgoing',

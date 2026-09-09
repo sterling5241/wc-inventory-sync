@@ -133,18 +133,15 @@ class WCIS_Subscriber {
 		$quantity     = intval( $params['quantity'] );
 		$stock_status = isset( $params['stock_status'] ) ? sanitize_text_field( $params['stock_status'] ) : '';
 
+		// Not logged: a subscriber only ever carries part of the master's
+		// catalog, so a reconciliation cycle re-checking every SKU hits this
+		// on purpose, every time, for every product this store doesn't
+		// stock. Logging it would just fill the Sync Log (and the Google
+		// Sheets export) with the same permanent, expected non-match over
+		// and over. The response is still a real 404 either way, so the
+		// master side still knows not to bother retrying it.
 		$product_id = wc_get_product_id_by_sku( $sku );
 		if ( ! $product_id ) {
-			WCIS_Logger::log(
-				array(
-					'direction' => 'incoming',
-					'event'     => 'update_stock',
-					'sku'       => $sku,
-					'qty_after' => $quantity,
-					'status'    => 'error',
-					'message'   => 'No product with this SKU found on this store.',
-				)
-			);
 			return new WP_Error( 'wcis_unknown_sku', 'No product with this SKU found on this store.', array( 'status' => 404 ) );
 		}
 
@@ -179,25 +176,33 @@ class WCIS_Subscriber {
 			return new WP_Error( 'wcis_stock_update_failed', $message, array( 'status' => 500 ) );
 		}
 
+		$status_changed = false;
 		if ( $stock_status ) {
 			$product = wc_get_product( $product_id );
 			if ( $product && $product->get_stock_status() !== $stock_status ) {
 				$product->set_stock_status( $stock_status );
 				$product->save();
+				$status_changed = true;
 			}
 		}
 
-		WCIS_Logger::log(
-			array(
-				'direction'  => 'incoming',
-				'event'      => 'update_stock',
-				'sku'        => $sku,
-				'product_id' => $product_id,
-				'qty_before' => $before,
-				'qty_after'  => $new_stock,
-				'status'     => 'success',
-			)
-		);
+		// Only log when something actually moved -- a reconciliation cycle
+		// re-confirming the same quantity for every SKU every ~15 minutes
+		// isn't an event worth a permanent row, on this site or in the
+		// Google Sheets export it feeds.
+		if ( $before !== (int) $new_stock || $status_changed ) {
+			WCIS_Logger::log(
+				array(
+					'direction'  => 'incoming',
+					'event'      => 'update_stock',
+					'sku'        => $sku,
+					'product_id' => $product_id,
+					'qty_before' => $before,
+					'qty_after'  => $new_stock,
+					'status'     => 'success',
+				)
+			);
+		}
 
 		return array(
 			'sku'          => $sku,
